@@ -6,7 +6,7 @@ Claude Code 개인 스킬 관리 repo. 서버 간 동기화용.
 
 ```bash
 # 1. clone
-gh repo clone nota-github/claude-skills ~/claude-skills
+gh repo clone dnjstjs/claude-skills ~/claude-skills
 
 # 2. 설치 (symlink + 환경 검증)
 ~/claude-skills/setup.sh
