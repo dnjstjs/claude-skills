@@ -242,7 +242,7 @@ Phase 1의 분석 결과를 바탕으로 내부적으로 설계 방향을 정리
 - 아키텍처 레이어별 변경 계획
 - 참고할 레퍼런스 구현 (예: workspace 도메인)
 - 구현 순서 (의존성 기반)
-- 각 티켓의 선후행 관계
+- 각 티켓의 구현 순서 (Description에 명시)
 
 ### Step 2-2: 티켓 목록 생성 → 사용자 확인
 
@@ -251,7 +251,7 @@ Phase 1의 분석 결과를 바탕으로 내부적으로 설계 방향을 정리
 1. **SDK와 Backend는 반드시 분리** — 같은 AC라도 SDK/Backend 각각 별도 티켓
 2. **DB 스키마 변경은 별도 티켓** — 마이그레이션 절차가 다름
 3. **아키텍처 레이어 단위로 묶기** — 한 티켓이 Domain+Application+Adapter를 모두 포함 가능 (단, 너무 크면 분할)
-4. **의존 순서 표시** — 티켓 간 선후행 관계 명시
+4. **구현 순서 표시** — 티켓 Description에 권장 구현 순서 명시 (Jira 링크는 생성하지 않음)
 5. **하나의 티켓은 1-3일 내 완료 가능한 크기**
 
 #### 강화된 티켓 Description 템플릿
@@ -298,7 +298,6 @@ Phase 1의 분석 결과를 바탕으로 내부적으로 설계 방향을 정리
 ## ➕ 특이사항
 
 * 🔀 Branch: `feat/{티켓키}-{slug}`
-* 선행 티켓: {선행 티켓 키} (이 티켓 완료 후 작업 가능)
 * Module: {SDK | Backend | DB Migration}
 * 참여자: {담당자}
 * ⚠️ {주의사항 — 레거시 코드 존재, DB 마이그레이션 필요 등}
@@ -368,23 +367,19 @@ Phase 1의 분석 결과를 바탕으로 내부적으로 설계 방향을 정리
      - customfield_10020: {Active Sprint ID}
    ```
 
-4. **스토리 링크 연결**:
+4. **스토리 링크 연결** (⚠️ 방향 주의 — 반드시 아래 그대로 사용):
    ```
    mcp__atlassian__createIssueLink
    - cloudId: "nota-dev.atlassian.net"
-   - outwardIssue: "{생성된 Task 키}"
-   - inwardIssue: "{스토리 키}"
+   - outwardIssue: "{생성된 Task 키}"    ← Task (blocks 쪽)
+   - inwardIssue: "{스토리 키}"           ← Story (is blocked by 쪽)
    - type: "Blocks"
    ```
+   → Jira UI 결과:
+     - Task 화면: "blocks Story"
+     - Story 화면: "is blocked by Task"
+   → ⚠️ 절대 outward/inward를 바꾸지 말 것. outwardIssue가 항상 Task.
 
-5. **티켓 간 선후행 연결** (선행 티켓이 있는 경우):
-   ```
-   mcp__atlassian__createIssueLink
-   - cloudId: "nota-dev.atlassian.net"
-   - outwardIssue: "{선행 티켓 키}"
-   - inwardIssue: "{현재 티켓 키}"
-   - type: "Blocks"
-   ```
 
 ### Step 2-4: 브랜치 정보 기록
 
@@ -421,7 +416,7 @@ feat/{티켓키}-{요약 slug}
 | 2 | NPP02-YYYY | [SWE] {제목} | SDK | `feat/NPP02-YYYY-{slug}` | [바로가기](...) |
 | 3 | NPP02-ZZZZ | [SWE] {제목} | Backend | `feat/NPP02-ZZZZ-{slug}` | [바로가기](...) |
 
-총 {N}개 티켓 생성 | 브랜치 생성: ✅ | 스토리 연결: ✅ | 선후행 연결: ✅
+총 {N}개 티켓 생성 | 브랜치 생성: ✅ | 스토리 연결: ✅
 ```
 
 ---
