@@ -10,6 +10,7 @@
 
 ```bash
 ls -la ~/.claude/skills/story-to-spec
+ls -la ~/.claude/skills/add-task
 ls -la ~/.claude/skills/implement
 ```
 
@@ -73,7 +74,12 @@ git config user.email
 
 ```
 /story-to-spec NPP02-XXXX
-  │  Jira 스토리 분석 → 코드 탐색 → 사용자 대화 → 상세 티켓 생성
+  │  Jira 스토리 + 원천 소스(Confluence/spec MD) 분석 → 코드 탐색
+  │  → 요구사항 층위 대화 → 상세 티켓 일괄 생성
+  ▼
+/add-task [NPP02-XXXX] "설명 또는 문서"   (선택 — 추가 작업 발생 시)
+  │  구두·문서 요청 → 버그 fix/검증/추가 Task 단건 생성
+  │  스토리 있으면 동일 규칙으로 링크, 없으면 standalone
   ▼
 /implement NPP02-YYYY
   │  티켓 읽기 → 브랜치 생성 → CLAUDE.md 주입 → Agent 디스패치

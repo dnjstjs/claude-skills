@@ -16,7 +16,8 @@ gh repo clone dnjstjs/claude-skills ~/claude-skills
 
 | 스킬 | 설명 | 사용법 |
 |------|------|--------|
-| `story-to-spec` | Jira 스토리 → 코드 분석 → 구현 수준 상세 티켓 생성 | `/story-to-spec NPP02-6517` |
+| `story-to-spec` | Jira 스토리 + 원천 소스 → 코드 분석 → 요구사항 대화 → 상세 티켓 일괄 생성 | `/story-to-spec NPP02-6517` |
+| `add-task` | 구두·문서 요청 → 버그 fix/검증/추가 Task 단건 생성 (동일 링크 규칙) | `/add-task NPP02-6517 "빈 입력 크래시 fix"` |
 | `implement` | 티켓 → 브랜치 → 백그라운드 Agent 구현 → PR 생성 | `/implement NPP02-6559` |
 
 ## 업데이트
