@@ -11,6 +11,7 @@
 ```bash
 ls -la ~/.claude/skills/story-to-spec
 ls -la ~/.claude/skills/add-task
+ls -la ~/.claude/skills/update-ticket
 ls -la ~/.claude/skills/implement
 ```
 
@@ -80,6 +81,10 @@ git config user.email
 /add-task [NPP02-XXXX] "설명 또는 문서"   (선택 — 추가 작업 발생 시)
   │  구두·문서 요청 → 버그 fix/검증/추가 Task 단건 생성
   │  스토리 있으면 동일 규칙으로 링크, 없으면 standalone
+  ▼
+/update-ticket NPP02-YYYY "보강 내용"   (선택 — 기존 티켓 수정 시)
+  │  기존 티켓 읽기 → 추가 맥락 수집 → gh(PR/문서/코드) ground-truth 검증
+  │  → 충돌·공백 표면화 → 기존 구조 유지하며 description 전체 교체
   ▼
 /implement NPP02-YYYY
   │  티켓 읽기 → 브랜치 생성 → CLAUDE.md 주입 → Agent 디스패치
