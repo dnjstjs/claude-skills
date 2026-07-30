@@ -57,7 +57,10 @@ mcp__atlassian__getJiraIssue
 - `issuelinks`: 선후행 관계
 
 **Description에서 추출할 메타데이터:**
-- `Module:` 필드 → SDK / Backend / DB Migration 판단
+- `Module:` 필드 → 작업 패키지 판단. 허용값:
+  `Client | Backend | Engine | Common | SDK(legacy) | DB Migration | CI`
+  - ⚠️ 기존 티켓엔 `Module: SDK`가 그대로 쓰여 있다. **`SDK`와 `SDK(legacy)`는 동일 취급.**
+  - 값이 없으면 Step 4의 추론 경로를 쓴다.
 - `🔀 Branch:` 필드 → 이미 지정된 브랜치명 확인
 - `선행 티켓:` 필드 → 선행 작업 완료 여부 확인
 
@@ -126,9 +129,54 @@ git push origin feat/{브랜치명}
 
 티켓의 `Module:` 필드를 기반으로 Agent에게 주입할 아키텍처 가이드를 **직접 읽어서** 수집한다.
 
-### SDK 영역 티켓일 때
+> **먼저 구조 참조 파일을 읽는다:**
+> `~/.claude/skills/story-to-spec/references/np-enterprise-structure.md`
+> (폴백: `~/claude-skills/story-to-spec/references/np-enterprise-structure.md`)
+>
+> 패키지 지도·경로·규율·`Module:` 허용값이 여기 있다. phase 2 구조:
+> `client`(thin CLI, core-free) → `backend`(API·오케스트레이션) → `engine`(compute, core 허용),
+> `common`(계약 공유), `sdk`(레거시).
 
-다음 파일들을 Read로 읽어 Agent 프롬프트에 주입:
+### Client 영역 티켓일 때
+
+| 파일 | 내용 | 주입 방식 |
+|------|------|----------|
+| `client/README.md` | np-client 헥사곤, core-free 규칙, 레퍼런스 수직 슬라이스 | 전문 주입 |
+| `sdk/src/CLAUDE.md` | Python 코딩 규칙, DTO/Service 패턴 (**client가 sdk 규율 승계**) | 전문 주입 |
+| `client/docs/migration-charter.md` | parity / deviation log / `# MIGRATION-KEEP` 규칙 | 이관 성격 티켓만 주입 |
+
+⚠️ **core-free 제약을 Agent 프롬프트에 명시**: `torch`, `np_quantizer_v2`, `np_hw_common`,
+`np_ir_manager`, `np_graph_*`, `np_compiler`, `np_profiler`, `np_core_kit` import 금지.
+
+### Engine 영역 티켓일 때
+
+| 파일 | 내용 | 주입 방식 |
+|------|------|----------|
+| `engine/README.md` | np-engine 헥사곤, `ENGINE_ROLE`(worker/api/oneshot), core 허용 범위 | 전문 주입 |
+| `sdk/src/CLAUDE.md` | Python 코딩 규칙 (**engine도 sdk 규율 승계**) | 전문 주입 |
+| `engine/src/np_engine/adapter/inbound/message/one_shot_message_runner.py` | oneshot 계약 (빈 큐 exit 0, heartbeat, 종료 코드) | oneshot 관련 티켓만 — **모듈 docstring만** 주입 |
+
+⚠️ **레거시 차단 제약 명시**: 구 sdk-flat 최상위 bare import
+(`adapter`/`application`/`domain`/`common`/`config`) 금지.
+
+### Backend 영역 티켓일 때
+
+| 파일 | 내용 | 주입 방식 |
+|------|------|----------|
+| `backend/CLAUDE.md` | 클린 아키텍처 가이드 | **섹션 1~3만** 주입 (전문은 42K 토큰으로 과대) |
+| `backend/MESSAGE_QUEUE_USAGE.md` | 토픽 핸들러 레지스트리·구독 절차 | 이벤트 관련 티켓만 주입 |
+
+### Common 영역 티켓일 때
+
+| 파일 | 내용 | 주입 방식 |
+|------|------|----------|
+| `common/src/np_common/` 해당 모듈 | 변경할 계약 원문 | 대상 파일만 Read |
+| 티켓의 "계약 소비처" | client·backend·engine 중 영향받는 쪽 | 프롬프트에 경고로 명시 |
+
+⚠️ **계약 변경은 소비처를 동시에 깨뜨린다.** Agent에게 소비처(`grep`으로 사용처 확인)를
+반드시 점검하도록 지시한다.
+
+### SDK(legacy) 영역 티켓일 때
 
 | 파일 | 내용 | 주입 방식 |
 |------|------|----------|
@@ -136,21 +184,27 @@ git push origin feat/{브랜치명}
 | `sdk/src/CLAUDE.md` | Python 코딩 규칙, DTO/Service 패턴 | 전문 주입 |
 | `sdk/src/adapter/inbound/cli/CLAUDE.md` | CLI 아키텍처 규칙 | CLI 관련 티켓만 주입 |
 
-### Backend 영역 티켓일 때
-
-| 파일 | 내용 | 주입 방식 |
-|------|------|----------|
-| `backend/CLAUDE.md` | 클린 아키텍처 가이드 | **섹션 1~3만** 주입 (전문은 42K 토큰으로 과대) |
-
 ### 주입 대상 판단 로직
 
 ```
 Module 필드가:
-  "SDK"      → sdk/CLAUDE.md + sdk/src/CLAUDE.md
-  "Backend"  → backend/CLAUDE.md (섹션 1~3)
-  "SDK+CLI"  → 위 SDK + cli/CLAUDE.md
-  없음       → 티켓 제목/내용에서 키워드로 추론
+  "Client"        → client/README.md + sdk/src/CLAUDE.md
+                    (+ client/docs/migration-charter.md — 이관 성격일 때)
+  "Engine"        → engine/README.md + sdk/src/CLAUDE.md
+                    (+ one_shot_message_runner.py docstring — oneshot 티켓만)
+  "Backend"       → backend/CLAUDE.md (섹션 1~3)
+                    (+ backend/MESSAGE_QUEUE_USAGE.md — 이벤트 티켓만)
+  "Common"        → 대상 계약 파일 + 소비처 경고
+  "SDK" / "SDK(legacy)" → sdk/CLAUDE.md + sdk/src/CLAUDE.md
+  "SDK+CLI"       → 위 SDK + sdk/src/adapter/inbound/cli/CLAUDE.md
+  "DB Migration"  → backend/CLAUDE.md (섹션 1~3) + 마이그레이션 절차
+  "CI"            → .github/ 워크플로 + 대상 스크립트
+  없음            → 참조 파일 §4 귀속 판정 트리 + 티켓 제목/내용 키워드로 추론
 ```
+
+> ⚠️ **`Module: SDK`를 봤다고 자동으로 레거시 작업이라 단정하지 말 것.** phase 2 이전에
+> 만들어진 티켓일 수 있다. 변경 대상 경로가 `client/`·`engine/`을 가리키면 그쪽 가이드를 쓴다.
+> 판단이 갈리면 사용자에게 확인한다.
 
 ---
 
@@ -180,7 +234,14 @@ Agent({
 
 ## 2. 아키텍처 가이드 (반드시 준수)
 
-{Step 4에서 수집한 CLAUDE.md 내용}
+{Step 4에서 수집한 아키텍처 가이드 전문 — 패키지별로 다름:
+ Client → client/README.md + sdk/src/CLAUDE.md (+ migration-charter)
+ Engine → engine/README.md + sdk/src/CLAUDE.md (+ oneshot docstring)
+ Backend → backend/CLAUDE.md 섹션 1~3
+ SDK(legacy) → sdk/CLAUDE.md + sdk/src/CLAUDE.md}
+
+{패키지 제약 — Client면 core-free 금지 목록, Engine이면 레거시 bare import 금지,
+ Common이면 계약 소비처 경고}
 
 ## 3. 작업 규칙
 
@@ -193,6 +254,17 @@ Agent({
 ### 테스트
 - 구현한 코드에 대한 테스트를 작성
 - 기존 테스트가 깨지지 않는지 확인: pytest 실행
+- **아키텍처 테스트 필수** (패키지별 — 실패하면 구현이 잘못된 것):
+  ```bash
+  # Client 티켓
+  pytest client/tests/architecture     # core-free + 레이어 의존 강제
+  pytest client/tests
+
+  # Engine 티켓
+  pytest engine/tests/architecture     # no-legacy-import + 레이어 의존 강제
+  pytest engine/tests
+  ```
+- Common 티켓이면 **소비처까지 확인**: `pytest client/tests engine/tests` + backend 테스트
 
 ### 커밋
 - 커밋 메시지 형식: `feat: {한국어 설명}`
@@ -217,6 +289,7 @@ Agent({
 
   ## ✅ 체크리스트
   - [ ] 아키텍처 가이드 준수
+  - [ ] 아키텍처 테스트 통과 (core-free / no-legacy-import)
   - [ ] 테스트 작성 및 통과
   - [ ] 기존 테스트 regression 없음
 
@@ -266,6 +339,7 @@ Agent가 완료되면 결과를 확인하여 보고:
 | 항목 | 결과 |
 |------|------|
 | 구현 | ✅ / ❌ |
+| 아키텍처 테스트 | ✅ 통과 / ❌ 실패 / — (해당 없음) |
 | 테스트 | ✅ 통과 / ❌ 실패 |
 | 커밋 | {커밋 수}개 |
 | Push | ✅ / ❌ |

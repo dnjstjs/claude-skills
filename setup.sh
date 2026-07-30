@@ -31,6 +31,8 @@ for skill in "$SCRIPT_DIR"/*/; do
   # .git, __pycache__ 등 제외
   [[ "$name" == .* ]] && continue
   [[ "$name" == __* ]] && continue
+  # SKILL.md 없는 디렉토리는 스킬이 아님 (docs/ 등)
+  [[ -f "$skill/SKILL.md" ]] || continue
 
   if [ -L "$SKILLS_DIR/$name" ]; then
     # 이미 symlink 존재 — 경로 확인
