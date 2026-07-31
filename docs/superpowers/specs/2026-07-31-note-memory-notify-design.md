@@ -126,18 +126,26 @@ presigned URL은 백엔드가 발급한다. np-client는 URL을 조립하지 않
 
 `memory-check.sh`는 `MEMORY.md`의 각 항목에서 `Source`를 파싱해 판정한다.
 
-```bash
-git log -L :create_presigned_url:backend/src/pynp/api/v1/models.py a1b2c3d..HEAD --oneline
-```
+**`git log -L`은 쓰지 않는다.** 실측 결과 `git log -L :__init__:<file> <base>..HEAD`가
+`fatal: -L parameter '__init__' starting at line 1: no match`로 종료(rc=128)했다.
+`-L`은 심볼을 시작 리비전 기준으로 해석하고 funcname 패턴에 의존해 Python 메서드에서 신뢰할 수 없다.
 
-출력이 있으면 해당 심볼이 실제로 변경된 것이다.
+대신 **AST 기반 심볼 비교**를 쓴다 (`scripts/symbol_diff.py`).
 
-| 상황 | 표시 |
-|---|---|
-| 심볼 변경됨 | `⚠` |
-| 근거 파일 삭제됨 | `⚠ 삭제됨` |
-| 심볼 파싱 실패 | 파일 단위로 폴백 (`git log <commit>..HEAD -- <path>`) |
-| 커밋 해시 없음/무효 | 검사 건너뜀, 표시 없음 |
+1. `git show <base>:<path>` 와 `git show HEAD:<path>` 로 두 시점의 소스를 얻는다
+2. 각각 `ast.parse` 후 이름이 일치하는 `FunctionDef`/`AsyncFunctionDef`/`ClassDef` 를 찾는다
+3. `ast.get_source_segment` 로 뽑은 소스 조각을 문자열 비교한다
+
+동일 파일에서 4케이스가 정확히 구분되는 것을 확인했다
+(`__init__`→UNCHANGED, `StepParamsBuilder`→CHANGED, 없는 심볼→MISSING, 없는 파일→MISSING).
+
+| 상황 | 판정 | 표시 |
+|---|---|---|
+| 심볼 소스가 달라짐 | `CHANGED` (rc=1) | `⚠` |
+| 심볼 소스가 동일 | `UNCHANGED` (rc=0) | 표시 없음 |
+| HEAD에 심볼·파일 없음 | `MISSING` (rc=2) | `⚠ 삭제됨` |
+| Python이 아닌 파일 / 심볼 미지정 | 파일 단위 폴백 | `git log --format=%h <commit>..HEAD -- <path>` 출력 있으면 `⚠` |
+| 커밋 해시 없음/무효 | 검사 건너뜀 | 표시 없음 |
 
 - 훅은 `MEMORY.md`만 수정하고, 요약 한 줄(`⚠ 재확인 필요 2건`)을 세션 시작 컨텍스트로 올린다.
 - 항목이 50건을 넘으면 검사를 건너뛰고 "메모리 정리 필요" 경고만 낸다. 세션 시작 지연을 만들지 않기 위해서다.
