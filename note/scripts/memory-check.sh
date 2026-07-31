@@ -9,7 +9,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 STORE="${CC_MEMORY_STORE:-$HOME/claude-memory/np-enterprise}"
 INDEX="$STORE/MEMORY.md"
-MAX_ENTRIES="${CC_MEMORY_MAX:-50}"
+MAX_ENTRIES="${CC_MEMORY_MAX:-200}"
+# 항목당 Source 가 있으면 symbol_diff.py 가 git show 를 두 번 포크한다 —
+# 항목 수가 늘어날수록 SessionStart 를 막는 시간도 늘어난다. 벽시계 예산으로
+# 상한을 건다: 예산을 넘기면 그 시점부터는 검사를 멈추고 기존 표시를 그대로 둔다.
+BUDGET_SEC="${CC_MEMORY_BUDGET_SEC:-2}"
 DEFAULT_REPO="/ssd1/home/wonseon.song/test2/np-enterprise"
 
 # stdin(훅 입력)은 쓰지 않는다. 읽지 않고 그대로 둔다 —
@@ -47,7 +51,32 @@ trap 'rm -f "$TMP"' EXIT
 STALE=""
 COUNT=0
 
+# 예산 초과 판정용 시각(마이크로초, 정수). date 를 매 항목마다 포크하지 않도록
+# bash 내장 EPOCHREALTIME 을 쓴다.
+LOOP_START_US=${EPOCHREALTIME/./}
+BUDGET_US=$(( BUDGET_SEC * 1000000 ))
+BUDGET_EXCEEDED=0
+SKIPPED=0
+
 while IFS= read -r line; do
+  if [ "$BUDGET_EXCEEDED" -eq 0 ]; then
+    NOW_US=${EPOCHREALTIME/./}
+    if [ $(( NOW_US - LOOP_START_US )) -ge "$BUDGET_US" ]; then
+      BUDGET_EXCEEDED=1
+    fi
+  fi
+
+  if [ "$BUDGET_EXCEEDED" -eq 1 ]; then
+    # 예산 초과 후: 아직 보지 않은 항목은 손대지 않는다 — 기존 표시를 벗기지도,
+    # 새로 계산하지도 않는다. 이전에 계산된 ⚠ 를 예산 부족 때문에 잃는 것은
+    # 검사 지연보다 더 나쁘다.
+    printf '%s\n' "$line" >> "$TMP"
+    if printf '%s' "$line" | grep -qE "$ENTRY_RE"; then
+      SKIPPED=$((SKIPPED + 1))
+    fi
+    continue
+  fi
+
   # 기존 표시를 제거해 재실행해도 결과가 같게 만든다
   clean=$(printf '%s' "$line" | sed -E 's/^- (⚠ 삭제됨 |⚠ )/- /')
 
@@ -100,6 +129,9 @@ MSG=""
 [ "$COUNT" -gt 0 ] && MSG="⚠ 재확인 필요 ${COUNT}건: ${STALE}"
 if [ "$SYMBOL_DIFF_AVAILABLE" -eq 0 ]; then
   MSG="${MSG}${MSG:+ / }symbol_diff.py 없음 — 심볼 단위 검사를 건너뛰고 파일 단위로만 확인했습니다"
+fi
+if [ "$SKIPPED" -gt 0 ]; then
+  MSG="${MSG}${MSG:+ / }시간 예산(${BUDGET_SEC}초) 초과로 부분 검사 — ${SKIPPED}건 확인 건너뜀(기존 표시 유지)"
 fi
 [ -n "$MSG" ] && emit "$MSG"
 exit 0

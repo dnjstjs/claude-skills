@@ -94,10 +94,32 @@ assert_eq "$IDX_RUN1" "$IDX_RUN2" "재실행: MEMORY.md 전체 내용 동일 (id
 CC_MEMORY_STORE=/no/such/store bash "$HERE/../scripts/memory-check.sh" <<< '{}' >/dev/null && rc=0 || rc=$?
 assert_eq "0" "$rc" "저장소 없음: 정상 종료"
 
-# 항목 50건 초과 -> 검사 건너뛰고 정리 경고
+# --- 예산 초과: 부분 검사 (under cap, over CC_MEMORY_BUDGET_SEC) ---
+# 예산을 0으로 강제해 실제 소요 시간에 기대지 않고 결정적으로 재현한다.
+# "마크유지"는 unchanged-one.md(Source 가 실제로는 안 바뀜)를 가리키면서도
+# 인덱스에는 (이전 실행에서 남았다고 가정한) ⚠ 를 손으로 붙여 둔다 — 예산 안에서
+# 실제로 검사했다면 벗겨질 표시라서, 가드가 없으면 이 항목이 벗겨지고
+# 아래 assert_contains 가 실패한다(= 가드가 load-bearing 하다는 증거).
+cat > "$STORE/MEMORY.md" <<'EOF'
+- ⚠ [마크유지](unchanged-one.md) — 예산 초과로 미검사, 기존 표시 유지되어야 함
+- [정상](changed-one.md) — 예산 초과로 미검사, 표시 없는 채 그대로여야 함
+EOF
+BEFORE_BUDGET=$(cat "$STORE/MEMORY.md")
+OUT_BUDGET=$(CC_MEMORY_BUDGET_SEC=0 bash "$HERE/../scripts/memory-check.sh" <<< '{}')
+AFTER_BUDGET=$(cat "$STORE/MEMORY.md")
+
+assert_eq "$BEFORE_BUDGET" "$AFTER_BUDGET" "예산 0: 어떤 항목도 검사되지 않아 인덱스가 그대로"
+assert_contains "$AFTER_BUDGET" "⚠ [마크유지](unchanged-one.md)" "예산 초과: 닿지 않은 항목의 기존 ⚠ 표시가 유지됨"
+assert_contains "$OUT_BUDGET" "부분 검사" "예산 초과: 부분 검사임을 컨텍스트에 명시"
+assert_contains "$OUT_BUDGET" "2건" "예산 초과: 건너뛴 항목 수(2건)를 명시"
+
+# --- 항목 200건 초과 -> 검사 건너뛰고 정리 경고 (상한 초과, 예산과 무관) ---
 : > "$STORE/MEMORY.md"
-for i in $(seq 1 51); do echo "- [m$i](unchanged-one.md) — x" >> "$STORE/MEMORY.md"; done
+for i in $(seq 1 201); do echo "- [m$i](unchanged-one.md) — x" >> "$STORE/MEMORY.md"; done
+BEFORE_CAP=$(cat "$STORE/MEMORY.md")
 OUT=$(echo '{}' | bash "$HERE/../scripts/memory-check.sh")
-assert_contains "$OUT" "정리 필요" "51건: 정리 경고"
+AFTER_CAP=$(cat "$STORE/MEMORY.md")
+assert_contains "$OUT" "정리 필요" "201건(상한 200 초과): 정리 경고"
+assert_eq "$BEFORE_CAP" "$AFTER_CAP" "201건: 상한 초과로 스킵 -> 표시 변경 없음"
 
 finish
