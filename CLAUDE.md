@@ -13,6 +13,7 @@ ls -la ~/.claude/skills/story-to-spec
 ls -la ~/.claude/skills/add-task
 ls -la ~/.claude/skills/update-ticket
 ls -la ~/.claude/skills/implement
+ls -la ~/.claude/skills/scrum
 ```
 
 symlink이 없거나 깨져 있으면:
@@ -92,6 +93,16 @@ git config user.email
   ▼
 /review NPP02-YYYY
      코드 리뷰 → 머지 판단
+```
+
+파이프라인 밖 (읽기 전용):
+
+```
+/scrum [NPP02]
+   내 티켓 상태 스냅샷 → 데일리 스크럼 공유 문안 4섹션
+   검토 중(10094)=처리한 내용 / 진행 중(3)=오늘 할일 / Blocked(10032)=BLOCKER
+   + 티켓 코멘트에서 협조·논의 항목 추론 → 슬랙 복붙용 불릿 출력
+   ⚠️ Jira에 쓰지 않는다. 상태 관리는 사용자 몫.
 ```
 
 ## 공유 구조 참조 (중요)
