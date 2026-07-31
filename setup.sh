@@ -30,6 +30,16 @@ link_memory_dirs() {
   echo "[4/4] 메모리 저장소: $MEMORY_STORE"
   local linked=0 sub p enc target
   local -a displaced_backups=()   # 실제 내용이 백업된 경로들 — 마지막에 한 번 더 강조 출력
+
+  # Finding 2 수정: 인덱스 병합 시 memory-check.sh 가 ⚠ 로 표시해 둔 항목도
+  # 인식해야 한다 — 그렇지 않으면 그 파일들은 디스크에는 남지만 유일하게
+  # 자동 로드되는 인덱스에서는 빠져 고아가 된다. 정규식을 여기 새로 쓰면
+  # 두 곳이 각자 따로 드리프트할 수 있으므로, memory-check.sh:35 의
+  # ENTRY_RE 값을 그대로 읽어와 재사용한다 (제3의 변형을 만들지 않는다).
+  local entry_re
+  entry_re=$(sed -n "s/^ENTRY_RE='\(.*\)'\$/\1/p" "$SCRIPT_DIR/note/scripts/memory-check.sh" 2>/dev/null)
+  [ -n "$entry_re" ] || entry_re='^- (⚠ 삭제됨 |⚠ )?\[[^]]*\]\([^)]+\.md\)'
+
   for sub in "${MEMORY_SUBDIRS[@]}"; do
     p="$MEMORY_PROJECT_ROOT$sub"
     [ -d "$p" ] || continue
@@ -55,42 +65,137 @@ link_memory_dirs() {
       # displaced 되어 다시는 로드되지 않는 사고가 실제로 났다. 이제는 displace
       # 대신 adopt 한다: 저장소에 아직 없는 파일은 저장소로 흡수하고, 이름은
       # 같은데 내용이 다른 파일만 충돌로 보고 .bak 에 남긴다.
+      #
+      # 이 함수의 불변식: 저장소에 있다고 검증되지 않은 내용은 절대 지우지
+      # 않는다. 그래서 아래에서는 target 아래 "모든" 항목(일반 파일, dotfile,
+      # 하위 디렉터리, 그 외 노드)을 하나도 빠짐없이 계산에 넣는다 — 예전
+      # 버그는 `"$target"/*` 글롭이 dotfile을 아예 보지 못하고, `[ -f "$f" ]`
+      # 가드가 하위 디렉터리를 통째로 건너뛰어, 그 항목들이 세어지지도 않은
+      # 채 마지막 `rm -rf`에 그냥 같이 쓸려나갔던 것이다.
+      #
+      # 하위 디렉터리 설계 선택: 재귀적으로 들어가 흡수하지 않는다. 통째로
+      # .bak 에 보존한다. 재귀하면 중첩된 MEMORY.md 병합, 임의 깊이, 심볼릭
+      # 링크 루프, 권한 오류까지 이 함수 안에서 다시 다 처리해야 해서 실수할
+      # 표면이 크게 늘어난다. 통째 보존은 구현이 단순하고, 불변식(무손실)을
+      # 기계적으로 만족시키며, 사람이 나중에 직접 살펴보게 한다 — 이미 이름
+      # 충돌 파일과 "파일이 이미 있던 자리" 케이스에도 같은 전략을 쓰고 있어
+      # 일관적이다. 자동 병합을 포기하는 대신 안전을 산다.
       local bak="$target.bak.$(date +%s)"
-      local adopted=0 conflicted=0 f base
-      local -a conflict_names=()
-      for f in "$target"/*; do
-        [ -f "$f" ] || continue          # 하위 디렉터리·심볼릭 링크 등은 다루지 않는다
+      local adopted=0 conflicted=0 nonfile_preserved=0 unadopted=0 f base
+      local -a conflict_names=() nonfile_names=() unadopted_names=()
+
+      while IFS= read -r -d '' f; do
         base=$(basename "$f")
         [ "$base" = "MEMORY.md" ] && continue   # 인덱스는 아래에서 별도로 병합한다
-        if [ ! -e "$MEMORY_STORE/$base" ]; then
-          cp -p "$f" "$MEMORY_STORE/$base" 2>/dev/null && adopted=$((adopted + 1))
-        elif ! cmp -s "$f" "$MEMORY_STORE/$base" 2>/dev/null; then
-          # 이름은 같은데 내용이 다르다 — 어느 쪽이 최신인지 알 수 없으므로
-          # 저장소 쪽을 덮어쓰지 않고, 원본을 백업으로 옮겨 사람이 보게 한다.
+
+        if [ -f "$f" ] && [ ! -L "$f" ]; then
+          # 일반 파일(dotfile 포함) — 저장소로 흡수를 시도한다.
+          if [ ! -e "$MEMORY_STORE/$base" ]; then
+            if cp -p "$f" "$MEMORY_STORE/$base" 2>/dev/null && cmp -s "$f" "$MEMORY_STORE/$base" 2>/dev/null; then
+              adopted=$((adopted + 1))
+              continue
+            fi
+            # 저장소 쓰기 실패(용량/권한 등) — 절대 그냥 버리지 않고 .bak 로 보존한다.
+            rm -f "$MEMORY_STORE/$base" 2>/dev/null   # 반쯤 쓰인 파일 정리
+            if mkdir -p "$bak" 2>/dev/null && mv "$f" "$bak/$base" 2>/dev/null; then
+              conflicted=$((conflicted + 1))
+              conflict_names+=("$base (저장소 쓰기 실패 — 백업 보존)")
+            else
+              unadopted=$((unadopted + 1))
+              unadopted_names+=("$base")
+            fi
+          elif ! cmp -s "$f" "$MEMORY_STORE/$base" 2>/dev/null; then
+            # 이름은 같은데 내용이 다르다 — 어느 쪽이 최신인지 알 수 없으므로
+            # 저장소 쪽을 덮어쓰지 않고, 원본을 백업으로 옮겨 사람이 보게 한다.
+            if mkdir -p "$bak" 2>/dev/null && mv "$f" "$bak/$base" 2>/dev/null; then
+              conflicted=$((conflicted + 1))
+              conflict_names+=("$base")
+            else
+              unadopted=$((unadopted + 1))
+              unadopted_names+=("$base")
+            fi
+          fi
+          # 내용이 완전히 같으면 아무 것도 하지 않는다 — 저장소에 이미 있다.
+        else
+          # 하위 디렉터리(위 설계 선택에 따라 재귀하지 않음), 심볼릭 링크,
+          # 기타 특수 노드 — 전부 통째로 .bak 에 보존한다.
+          local label="$base"
+          [ -d "$f" ] && [ ! -L "$f" ] && label="$base/"
           if mkdir -p "$bak" 2>/dev/null && mv "$f" "$bak/$base" 2>/dev/null; then
-            conflicted=$((conflicted + 1))
-            conflict_names+=("$base")
+            nonfile_preserved=$((nonfile_preserved + 1))
+            nonfile_names+=("$label")
+          else
+            unadopted=$((unadopted + 1))
+            unadopted_names+=("$label")
           fi
         fi
-        # 내용이 완전히 같으면 아무 것도 하지 않는다 — 저장소에 이미 있다.
-      done
+      done < <(find "$target" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
 
       # MEMORY.md 인덱스는 통째로 덮지 않고 병합한다. 저장소 쪽 인덱스를
       # 클로버하면 이미 저장소에만 있던 항목이 사라진다 — 들어오는 쪽의
-      # 항목 줄(`- [...]`) 중 저장소에 아직 없는 것만 이어붙인다.
+      # 항목 줄 중 저장소에 아직 없는 것만 이어붙인다. `- [...]` 뿐 아니라
+      # memory-check.sh 가 붙이는 `- ⚠ [...]`, `- ⚠ 삭제됨 [...]` 도 항목으로
+      # 인식해야 한다(Finding 2) — 안 그러면 그 파일들은 흡수되어도 인덱스에는
+      # 실리지 않아 다시는 자동 로드되지 않는다.
+      local index_lost=0
       if [ -f "$target/MEMORY.md" ]; then
         if [ -f "$MEMORY_STORE/MEMORY.md" ]; then
           while IFS= read -r idxline || [ -n "$idxline" ]; do
-            case "$idxline" in
-              '- ['*)
-                grep -qxF -- "$idxline" "$MEMORY_STORE/MEMORY.md" 2>/dev/null || \
-                  printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md"
-                ;;
-            esac
+            [[ "$idxline" =~ $entry_re ]] || continue
+            # Finding 3: 같은 파일을 가리키는 줄이 설명 문구만 다르게 두 번
+            # 들어오면 중복 항목이 생기고 CC_MEMORY_MAX 카운트도 부풀려진다.
+            # 전체 줄이 아니라 링크 대상 `(file.md)` 기준으로 중복을 걸러
+            # 먼저 들어온 것만 남긴다.
+            local file_target
+            file_target=$(printf '%s' "$idxline" | sed -nE 's/.*\(([^)]+\.md)\).*/\1/p')
+            if [ -n "$file_target" ]; then
+              case "$(cat "$MEMORY_STORE/MEMORY.md" 2>/dev/null)" in
+                *"($file_target)"*) ;;  # 이미 있음 — 첫 등장을 유지, 건너뜀
+                *) printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md" ;;
+              esac
+            else
+              grep -qxF -- "$idxline" "$MEMORY_STORE/MEMORY.md" 2>/dev/null || \
+                printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md"
+            fi
           done < "$target/MEMORY.md"
         else
           cp -p "$target/MEMORY.md" "$MEMORY_STORE/MEMORY.md" 2>/dev/null || true
         fi
+
+        # 검증: 들어오는 인덱스의 항목 줄이 전부(파일 링크 기준) 저장소
+        # 인덱스에 실제로 반영됐는지 확인한다. 위 append 가 쓰기 실패 등으로
+        # 조용히 안 먹었을 수 있으므로, 확인 없이 원본을 지우면 그 항목들은
+        # 디스크(파일)엔 남아도 유일한 자동 로드 경로인 인덱스에서 고아가 된다.
+        while IFS= read -r idxline || [ -n "$idxline" ]; do
+          [[ "$idxline" =~ $entry_re ]] || continue
+          local ft
+          ft=$(printf '%s' "$idxline" | sed -nE 's/.*\(([^)]+\.md)\).*/\1/p')
+          [ -n "$ft" ] || continue
+          case "$(cat "$MEMORY_STORE/MEMORY.md" 2>/dev/null)" in
+            *"($ft)"*) ;;
+            *) index_lost=1 ;;
+          esac
+        done < "$target/MEMORY.md"
+
+        if [ "$index_lost" -eq 1 ]; then
+          if mkdir -p "$bak" 2>/dev/null && cp -p "$target/MEMORY.md" "$bak/MEMORY.md" 2>/dev/null; then
+            conflicted=$((conflicted + 1))
+            conflict_names+=("MEMORY.md (일부 항목 병합 실패 — 원본 보존)")
+          else
+            unadopted=$((unadopted + 1))
+            unadopted_names+=("MEMORY.md")
+          fi
+        fi
+      fi
+
+      if [ "$unadopted" -gt 0 ]; then
+        # 저장소로도 .bak 으로도 옮기지 못한 항목이 있다 — 이 경우 원본을
+        # 절대 지우지 않는다(rm -rf 하지 않음). symlink 도 만들지 않는다.
+        # "성공" 문구는 절대 찍지 않고, 무엇이 어디 남았는지만 말한다.
+        echo "  ⚠️  $(basename "$p") (${unadopted}개 항목을 저장소로도 백업으로도 옮기지 못함 — 원본 보존, symlink 미생성)"
+        echo "     ⚠️  → 대상: ${unadopted_names[*]}"
+        echo "     ⚠️  → 원본 경로 그대로 둠: $target"
+        continue
       fi
 
       if ! rm -rf "$target" 2>/dev/null; then
@@ -99,12 +204,24 @@ link_memory_dirs() {
       fi
       ln -sfn "$MEMORY_STORE" "$target" || { echo "  ⚠️  $(basename "$p") (symlink 생성 실패)"; continue; }
 
-      echo "  📥 $(basename "$p") (dir → symlink, 내용은 저장소로 흡수됨)"
+      local left=$((conflicted + nonfile_preserved))
+      if [ "$left" -gt 0 ]; then
+        # 뭔가 하나라도 .bak 에 남았으면 무조건 성공 문구를 찍지 않는다 —
+        # 남은 것과 위치를 함께 말한다.
+        echo "  📥 $(basename "$p") (dir → symlink, 일부만 흡수됨 — ${left}개 항목은 흡수되지 않고 .bak 에 보존: $bak)"
+      else
+        echo "  📥 $(basename "$p") (dir → symlink, 내용은 저장소로 흡수됨)"
+      fi
       [ "$adopted" -gt 0 ] && echo "     ✅ 새 파일 ${adopted}개를 저장소로 흡수"
       if [ "$conflicted" -gt 0 ]; then
-        echo "     ⚠️  이름은 같지만 내용이 다른 파일 ${conflicted}개는 덮어쓰지 않고 백업: $bak"
+        echo "     ⚠️  저장소로 흡수하지 못하고 .bak 에 보존된 파일 ${conflicted}개: $bak"
         echo "     ⚠️  → 대상: ${conflict_names[*]}"
         displaced_backups+=("$(basename "$p")|$bak|$conflicted")
+      fi
+      if [ "$nonfile_preserved" -gt 0 ]; then
+        echo "     ⚠️  하위 디렉터리/기타 항목 ${nonfile_preserved}개는 흡수하지 않고 통째로 .bak 에 보존: $bak"
+        echo "     ⚠️  → 대상: ${nonfile_names[*]}"
+        displaced_backups+=("$(basename "$p") (하위 디렉터리 등)|$bak|$nonfile_preserved")
       fi
       linked=$((linked + 1))
       continue

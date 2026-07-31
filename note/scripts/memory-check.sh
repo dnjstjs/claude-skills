@@ -50,7 +50,12 @@ SYMBOL_DIFF_AVAILABLE=1
 # /tmp 는 흔히 다른 파일시스템이라(실측: tmpfs 대 홈 디스크, device 번호가 다름)
 # mktemp 를 거기 두면 mv 가 copy-then-unlink 로 바뀌어, SessionStart 가 인덱스를
 # 읽는 도중 다른 세션이 시작되면 잘린(torn) 내용을 그대로 읽어갈 수 있다.
-TMP=$(mktemp -p "$STORE")
+TMP=$(mktemp -p "$STORE" 2>/dev/null)
+# 저장소가 쓰기 불가(권한/용량 등)면 mktemp 가 실패해 TMP 가 빈 문자열이 된다.
+# 예전에는 이후의 모든 임시 파일 접근(trap의 rm, 아래 append 들)이 빈 경로에
+# 대해 각각 오류를 내며 stderr 를 어지럽혔다 — 데이터 유실은 없었지만 이
+# 실패는 조용히 지나가야 한다(할 수 있는 게 없으므로 그냥 종료).
+[ -n "$TMP" ] || exit 0
 trap 'rm -f "$TMP"' EXIT
 STALE=""
 COUNT=0

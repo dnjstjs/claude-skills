@@ -17,6 +17,28 @@ run_setup() {
     bash -c '. "'"$HERE"'/../../setup.sh" --memory-only' >/dev/null 2>&1
 }
 
+# stdout+stderr 를 버리지 않고 돌려주는 버전 — "성공을 주장하지 않는다"를
+# 검증하려면 실제로 무슨 줄이 찍혔는지 봐야 한다.
+run_setup_capture() {
+  HOME="$FAKE_HOME" CC_MEMORY_STORE="$STORE" CC_MEMORY_PROJECT_ROOT="$PROJ_ROOT" \
+    bash -c '. "'"$HERE"'/../../setup.sh" --memory-only' 2>&1
+}
+
+# 파일이 저장소(STORE) 또는 지정된 .bak 디렉터리, 둘 중 하나에라도 byte-for-byte
+# 그대로 존재하면 통과 — "유실되지 않았다"만 확인하고 정확히 어느 쪽에
+# 있어야 하는지는 강제하지 않는다 (Finding 1: 흡수든 백업이든, 사라지는 것만 아니면 됨).
+assert_preserved() {  # <bak_dir_or_empty> <relpath> <expected_content> <label>
+  local bakdir="$1" relpath="$2" expected="$3" label="$4"
+  local ok=false
+  if [ -f "$STORE/$relpath" ] && [ "$(cat "$STORE/$relpath" 2>/dev/null)" = "$expected" ]; then
+    ok=true
+  fi
+  if [ -n "$bakdir" ] && [ -f "$bakdir/$relpath" ] && [ "$(cat "$bakdir/$relpath" 2>/dev/null)" = "$expected" ]; then
+    ok=true
+  fi
+  assert_eq "true" "$ok" "$label"
+}
+
 HOME="$FAKE_HOME" \
 CC_MEMORY_STORE="$FAKE_HOME/claude-memory/np-enterprise" \
 CC_MEMORY_PROJECT_ROOT="$PROJ_ROOT" \
