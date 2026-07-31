@@ -32,4 +32,10 @@ CC_SLACK_WEBHOOK_FILE=/no/such/webhook
 slack_send "테스트" && rc=0 || rc=$?
 assert_eq "0" "$rc" "slack_send: 웹훅 없으면 성공 종료"
 
+# short_cwd: 경로의 마지막 2단계만 남긴다
+assert_eq "c/d" "$(short_cwd /a/b/c/d)" "short_cwd: 마지막 2단계"
+assert_eq "c/d" "$(short_cwd /a/b/c/d/)" "short_cwd: 후행 슬래시 제거"
+assert_eq "engine" "$(short_cwd /engine)" "short_cwd: 1단계 경로"
+assert_eq "" "$(short_cwd '')" "short_cwd: 빈 경로"
+
 finish

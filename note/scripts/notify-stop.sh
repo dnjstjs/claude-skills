@@ -37,7 +37,7 @@ RES=$(printf '%s' "$MSG" | clean_text 200)
 [ -n "$REQ" ] || REQ="(내용 없음)"
 
 # 경로: 훅이 준 cwd 의 마지막 2단계 ($(pwd) 는 논리 경로라 쓰지 않는다)
-SHORT_CWD=$(printf '%s' "$CWD" | awk -F/ '{ if (NF>=2) printf "%s/%s", $(NF-1), $NF; else printf "%s", $NF }')
+SHORT_CWD=$(short_cwd "$CWD")
 BRANCH=$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
 LOC="$SHORT_CWD"
 [ -n "$BRANCH" ] && LOC="$SHORT_CWD · $BRANCH"

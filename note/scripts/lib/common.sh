@@ -60,3 +60,12 @@ human_duration() {  # <seconds>
   h=$((s / 3600)); m=$(((s % 3600) / 60))
   echo "${h}시간 ${m}분"
 }
+
+# 경로의 마지막 2단계만 남긴다 (예: /a/b/c/d -> c/d).
+# 후행 슬래시를 먼저 떼지 않으면 마지막 필드가 비어 'c/' 처럼 잘못 나온다.
+short_cwd() {  # <path>
+  local p="${1:-}"
+  while [ "${p%/}" != "$p" ] && [ "$p" != "/" ]; do p="${p%/}"; done
+  [ -n "$p" ] || return 0
+  printf '%s' "$p" | awk -F/ '{ if (NF>=2 && $(NF-1) != "") printf "%s/%s", $(NF-1), $NF; else printf "%s", $NF }'
+}
