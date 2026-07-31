@@ -1,0 +1,5 @@
+{"type":"last-prompt","lastPrompt":"레거시 검증기에 AMP 예외 추가 진행해줘","sessionId":"s1"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"확인했습니다"}]},"timestamp":"2026-07-31T02:00:00.000Z"}
+{"type":"last-prompt","lastPrompt":"/note \"presigned URL은 백엔드가 발급\"","sessionId":"s1"}
+{"type":"ai-title","aiTitle":"AMP 예외 처리","sessionId":"s1"}
+{"type":"last-prompt","lastPrompt":"커밋 푸시 부탁","sessionId":"s1"}
