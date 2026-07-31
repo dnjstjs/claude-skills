@@ -13,7 +13,9 @@ ls -la ~/.claude/skills/story-to-spec
 ls -la ~/.claude/skills/add-task
 ls -la ~/.claude/skills/update-ticket
 ls -la ~/.claude/skills/implement
+ls -la ~/.claude/skills/spec-diff
 ls -la ~/.claude/skills/scrum
+ls -la ~/.claude/skills/note
 ```
 
 symlink이 없거나 깨져 있으면:
@@ -103,6 +105,13 @@ git config user.email
    검토 중(10094)=처리한 내용 / 진행 중(3)=오늘 할일 / Blocked(10032)=BLOCKER
    + 티켓 코멘트에서 협조·논의 항목 추론 → 슬랙 복붙용 불릿 출력
    ⚠️ Jira에 쓰지 않는다. 상태 관리는 사용자 몫.
+
+/spec-diff NPP02-XXXX [--docs <경로>] [--deep]
+   기획 문서(np-product-docs) ↔ 머지된 PR 양방향 대조
+   스토리 → 하위 Task → PR 수집(귀속 판정으로 오탐 제거) → 문서 섹션과 대조
+   ❌미구현 / ⚠️다르게 구현 / ➕문서에 없음 / 🕓의도된 미구현(후속 EXT·WIP)
+   ⚠️ Jira·문서에 쓰지 않는다. 후속 명령 문안만 제안한다.
+   ⚠️ 문서가 낡은 건지 구현이 틀린 건지는 단정하지 않는다 (판단 주체가 다름).
 ```
 
 ## 공유 구조 참조 (중요)
