@@ -29,6 +29,7 @@ link_memory_dirs() {
   mkdir -p "$MEMORY_STORE"
   echo "[4/4] 메모리 저장소: $MEMORY_STORE"
   local linked=0 sub p enc target
+  local -a displaced_backups=()   # 실제 내용이 백업된 경로들 — 마지막에 한 번 더 강조 출력
   for sub in "${MEMORY_SUBDIRS[@]}"; do
     p="$MEMORY_PROJECT_ROOT$sub"
     [ -d "$p" ] || continue
@@ -49,12 +50,35 @@ link_memory_dirs() {
     if [ -L "$target" ]; then
       ln -sfn "$MEMORY_STORE" "$target" || { echo "  ⚠️  $(basename "$p") (symlink 갱신 실패)"; continue; }
     elif [ -d "$target" ]; then
-      if ! mv "$target" "$target.bak.$(date +%s)" 2>/dev/null; then
+      local bak="$target.bak.$(date +%s)"
+      if ! mv "$target" "$bak" 2>/dev/null; then
         echo "  ⚠️  $(basename "$p") (기존 디렉토리 백업 실패, 건너뜀)"
         continue
       fi
       ln -sfn "$MEMORY_STORE" "$target" || { echo "  ⚠️  $(basename "$p") (symlink 생성 실패)"; continue; }
+      local nfiles
+      nfiles=$(find "$bak" -type f 2>/dev/null | wc -l)
       echo "  🔄 $(basename "$p") (dir → symlink, old backed up)"
+      echo "     ⚠️  기존 메모리 $nfiles개 파일이 옮겨졌습니다 — 새로 로드되지 않습니다!"
+      echo "     ⚠️  백업 위치: $bak"
+      echo "     ⚠️  → 이 내용을 $MEMORY_STORE 로 직접 병합해야 다시 로드됩니다."
+      displaced_backups+=("$(basename "$p")|$bak|$nfiles")
+      linked=$((linked + 1))
+      continue
+    elif [ -e "$target" ]; then
+      # 심볼릭 링크도, 디렉터리도 아닌 무언가(파일 등)가 이미 존재한다.
+      # ln -sfn 은 이런 노드를 경고 없이 덮어써버리므로, 반드시 먼저 백업한다.
+      local bak="$target.bak.$(date +%s)"
+      if ! mv "$target" "$bak" 2>/dev/null; then
+        echo "  ⚠️  $(basename "$p") (기존 파일 백업 실패, 건너뜀)"
+        continue
+      fi
+      ln -sfn "$MEMORY_STORE" "$target" || { echo "  ⚠️  $(basename "$p") (symlink 생성 실패)"; continue; }
+      echo "  🔄 $(basename "$p") (file → symlink, old backed up)"
+      echo "     ⚠️  기존 파일이 옮겨졌습니다 — 새로 로드되지 않습니다!"
+      echo "     ⚠️  백업 위치: $bak"
+      echo "     ⚠️  → 이 내용을 $MEMORY_STORE 로 직접 병합해야 다시 로드됩니다."
+      displaced_backups+=("$(basename "$p")|$bak|1")
       linked=$((linked + 1))
       continue
     else
@@ -64,6 +88,24 @@ link_memory_dirs() {
     linked=$((linked + 1))
   done
   echo "  $linked memory dirs linked"
+
+  if [ "${#displaced_backups[@]}" -gt 0 ]; then
+    echo ""
+    echo "  ╔═══════════════════════════════════════════════════════════╗"
+    echo "  ║  ⚠️  기존 메모리 내용이 백업 디렉터리로 옮겨졌습니다!        ║"
+    echo "  ║      병합하지 않으면 해당 내용은 더 이상 로드되지 않습니다.  ║"
+    echo "  ╚═══════════════════════════════════════════════════════════╝"
+    local entry name bak nfiles
+    for entry in "${displaced_backups[@]}"; do
+      name="${entry%%|*}"
+      entry="${entry#*|}"
+      bak="${entry%%|*}"
+      nfiles="${entry#*|}"
+      echo "    - $name: $nfiles개 파일 → $bak"
+    done
+    echo "    → 각 백업 경로의 파일을 $MEMORY_STORE 아래로 직접 병합하세요."
+    echo ""
+  fi
 }
 
 if [ "${1:-}" = "--memory-only" ]; then
