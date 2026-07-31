@@ -19,7 +19,9 @@
 - **Slack 웹훅 URL 하드코딩 금지.** `~/.claude/.slack-webhook`에서 읽고, 파일이 없으면 조용히 건너뛴다.
 - **경로는 훅 stdin의 `cwd`를 쓴다.** `$(pwd)` 금지 (논리 경로가 `/home/...`로 나옴).
 - **알림 임계값:** `CC_NOTIFY_MIN_SEC` 기본 `180`.
-- **메모리 항목 상한:** 50건. 초과 시 stale 검사를 건너뛰고 정리 경고만 낸다.
+- **메모리 항목 상한:** 200건 (`CC_MEMORY_MAX`). 초과 시 stale 검사를 건너뛰고 정리 경고만 낸다.
+- **stale 검사 시간 예산:** 2초 (`CC_MEMORY_BUDGET_SEC`). 초과하면 남은 항목을 건너뛰고 부분 검사임을 고지한다.
+  실측 근거: 항목 49건 루프에 1.1초, `Source` 가 붙은 항목은 건당 +0.18초. 예산이 없으면 세션 시작이 수 초씩 지연된다.
 - **메모리 저장소:** `~/claude-memory/np-enterprise/`. 기준 repo는 `<저장소>/.repo` 파일, 기본값 `/ssd1/home/wonseon.song/test2/np-enterprise`.
 - **작업 브랜치:** `feat/note-memory-notify` (이미 생성됨, 스펙 커밋 `fbdb715` 위).
 - **작업 repo:** `/ssd1/home/wonseon.song/claude-skills`. 모든 상대 경로는 이 디렉터리 기준.
