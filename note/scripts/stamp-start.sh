@@ -6,6 +6,8 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# 공통 라이브러리가 없으면 조용히 끝낸다 — 훅이 nonzero 로 죽으면 안 된다.
+[ -f "$HERE/lib/common.sh" ] || exit 0
 . "$HERE/lib/common.sh"
 
 INPUT=$(cat)
