@@ -679,11 +679,45 @@ git commit -m "feat(note): Stop 훅을 '오래 걸린 턴만' 알림으로 교�
 
 **Files:**
 - Create: `note/scripts/notify-session.sh`
-- Test: `note/tests/test_notify_session.sh`
+- Modify: `note/scripts/lib/common.sh` (`short_cwd` 추가)
+- Modify: `note/scripts/notify-stop.sh` (인라인 awk → `short_cwd` 호출)
+- Test: `note/tests/test_notify_session.sh`, `note/tests/test_common.sh` (`short_cwd` 케이스 추가)
 
 **Interfaces:**
 - Consumes: `common.sh` 전체, Task 2가 만든 `<session>.session`
-- Produces: 없음 (말단 훅). 종료 시 `$CC_NOTIFY_STATE_DIR/<session>.*` 를 삭제한다.
+- Produces: `common.sh` 에 `short_cwd <path>` → 경로의 마지막 2단계 문자열. `notify-stop.sh` 와 공유한다.
+- 종료 시 `$CC_NOTIFY_STATE_DIR/<session>.*` 를 삭제한다.
+
+**선행 정리:** Task 3 리뷰에서 경로 축약 `awk -F/` 가 후행 슬래시를 잘못 처리하는 것이 확인됐다
+(`/foo/bar/` → `bar/`). 같은 줄을 이 태스크에서 복제하지 말고, `common.sh` 로 뽑아 양쪽이 쓴다.
+
+`note/scripts/lib/common.sh` 끝에 추가한다.
+
+```bash
+# 경로의 마지막 2단계만 남긴다 (예: /a/b/c/d -> c/d).
+# 후행 슬래시를 먼저 떼지 않으면 마지막 필드가 비어 'c/' 처럼 잘못 나온다.
+short_cwd() {  # <path>
+  local p="${1:-}"
+  while [ "${p%/}" != "$p" ] && [ "$p" != "/" ]; do p="${p%/}"; done
+  [ -n "$p" ] || return 0
+  printf '%s' "$p" | awk -F/ '{ if (NF>=2 && $(NF-1) != "") printf "%s/%s", $(NF-1), $NF; else printf "%s", $NF }'
+}
+```
+
+`note/tests/test_common.sh` 에 케이스를 추가한다.
+
+```bash
+assert_eq "c/d" "$(short_cwd /a/b/c/d)" "short_cwd: 마지막 2단계"
+assert_eq "c/d" "$(short_cwd /a/b/c/d/)" "short_cwd: 후행 슬래시 제거"
+assert_eq "engine" "$(short_cwd /engine)" "short_cwd: 1단계 경로"
+assert_eq "" "$(short_cwd '')" "short_cwd: 빈 경로"
+```
+
+`note/scripts/notify-stop.sh` 의 아래 줄을 `SHORT_CWD=$(short_cwd "$CWD")` 로 교체한다.
+
+```bash
+SHORT_CWD=$(printf '%s' "$CWD" | awk -F/ '{ if (NF>=2) printf "%s/%s", $(NF-1), $NF; else printf "%s", $NF }')
+```
 
 메시지 형식:
 
@@ -811,7 +845,7 @@ if [ -f "$START_FILE" ]; then
   esac
 fi
 
-SHORT_CWD=$(printf '%s' "$CWD" | awk -F/ '{ if (NF>=2) printf "%s/%s", $(NF-1), $NF; else printf "%s", $NF }')
+SHORT_CWD=$(short_cwd "$CWD")
 
 TEXT="🏁 세션 종료 · ${SHORT_CWD}${DUR} · ${TURNS}턴"
 [ -n "$TITLE" ] && TEXT="$TEXT"$'\n'"📌 $TITLE"
