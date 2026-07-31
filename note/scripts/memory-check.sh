@@ -46,10 +46,15 @@ SYMBOL_DIFF="$HERE/symbol_diff.py"
 SYMBOL_DIFF_AVAILABLE=1
 [ -f "$SYMBOL_DIFF" ] || SYMBOL_DIFF_AVAILABLE=0
 
-TMP=$(mktemp)
+# $STORE 안에 임시 파일을 만들어야 mv 가 같은 파일시스템 안의 rename(2) 이 된다.
+# /tmp 는 흔히 다른 파일시스템이라(실측: tmpfs 대 홈 디스크, device 번호가 다름)
+# mktemp 를 거기 두면 mv 가 copy-then-unlink 로 바뀌어, SessionStart 가 인덱스를
+# 읽는 도중 다른 세션이 시작되면 잘린(torn) 내용을 그대로 읽어갈 수 있다.
+TMP=$(mktemp -p "$STORE")
 trap 'rm -f "$TMP"' EXIT
 STALE=""
 COUNT=0
+NO_SOURCE=0
 
 # 예산 초과 판정용 시각(마이크로초, 정수). date 를 매 항목마다 포크하지 않도록
 # bash 내장 EPOCHREALTIME 을 쓴다.
@@ -58,7 +63,7 @@ BUDGET_US=$(( BUDGET_SEC * 1000000 ))
 BUDGET_EXCEEDED=0
 SKIPPED=0
 
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "$line" ]; do
   if [ "$BUDGET_EXCEEDED" -eq 0 ]; then
     NOW_US=${EPOCHREALTIME/./}
     if [ $(( NOW_US - LOOP_START_US )) -ge "$BUDGET_US" ]; then
@@ -86,9 +91,13 @@ while IFS= read -r line; do
     continue
   fi
 
-  src=$(sed -nE 's/^\*\*Source:\*\* *`(.+)`.*/\1/p' "$STORE/$file" | head -1)
+  # 캡처를 non-greedy 로 한다 — 그리디 (.+) 는 줄에 백틱이 더 있으면(예: 본문에
+  # 참고용으로 다른 경로를 백틱으로 덧붙인 경우) 마지막 백틱까지 삼켜 쓰레기 값을
+  # 만들고, 커밋 추출이 조용히 실패해 검사가 아무 신호 없이 꺼진다.
+  src=$(sed -nE 's/^\*\*Source:\*\* *`([^`]+)`.*/\1/p' "$STORE/$file" | head -1)
   commit=$(printf '%s' "$src" | sed -nE 's/.*@([0-9a-fA-F]{7,40})$/\1/p')
   if [ -z "$commit" ]; then                     # 기준 커밋 없음 -> 검사 건너뜀
+    NO_SOURCE=$((NO_SOURCE + 1))
     printf '%s\n' "$clean" >> "$TMP"
     continue
   fi
@@ -123,10 +132,20 @@ while IFS= read -r line; do
   fi
 done < "$INDEX"
 
+# 원본 인덱스의 권한(대개 644)을 그대로 물려받는다. mktemp 는 기본 600 으로 만들기
+# 때문에, 물려받지 않으면 실행할 때마다 자기만 읽을 수 있는 파일로 조용히 바뀐다.
+chmod --reference="$INDEX" "$TMP" 2>/dev/null || chmod 644 "$TMP" 2>/dev/null || true
+
 mv "$TMP" "$INDEX" 2>/dev/null || rm -f "$TMP"
 
 MSG=""
 [ "$COUNT" -gt 0 ] && MSG="⚠ 재확인 필요 ${COUNT}건: ${STALE}"
+if [ "$NO_SOURCE" -gt 0 ]; then
+  # Source 가 없거나 커밋을 추출할 수 없는 항목은 애초에 stale 검사 대상이 아니다.
+  # 이걸 알리지 않으면 "표시 없음"이 "검사했고 이상 없음"과 구분되지 않아,
+  # 근거 없는 메모리가 감시받고 있다는 착각을 만든다.
+  MSG="${MSG}${MSG:+ / }근거 없음 ${NO_SOURCE}건 — stale 검사 대상 아님"
+fi
 if [ "$SYMBOL_DIFF_AVAILABLE" -eq 0 ]; then
   MSG="${MSG}${MSG:+ / }symbol_diff.py 없음 — 심볼 단위 검사를 건너뛰고 파일 단위로만 확인했습니다"
 fi

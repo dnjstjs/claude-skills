@@ -4,7 +4,7 @@
 
 **Goal:** 세션 간 도메인 판정을 `/note`로 보존하고, git 심볼 단위로 낡은 메모리를 표시하며, Slack 알림을 "매 응답"에서 "오래 걸린 턴 + 세션 종료 요약"으로 바꾼다.
 
-**Architecture:** 순수 bash 훅 스크립트 4개 + Python 헬퍼 2개 + `/note` 스킬 문서. 모든 훅은 `note/scripts/lib/common.sh`를 source해 트랜스크립트 파싱과 Slack 전송을 공유한다. 메모리 실체는 `~/claude-memory/np-enterprise/` 한 곳이고, 프로젝트별 `memory/` 디렉터리를 symlink로 연결한다.
+**Architecture:** 순수 bash 훅 스크립트 4개 + Python 헬퍼 2개 + `/note` 스킬 문서. `stamp-start.sh`/`notify-stop.sh`/`notify-session.sh` 세 훅은 `note/scripts/lib/common.sh`를 source해 트랜스크립트 파싱과 Slack 전송을 공유한다. `memory-check.sh`는 트랜스크립트나 Slack을 다루지 않으므로 `common.sh`를 source하지 않는다 — 독립 실행된다. 메모리 실체는 `~/claude-memory/np-enterprise/` 한 곳이고, 프로젝트별 `memory/` 디렉터리를 symlink로 연결한다(디렉터리에 실제 메모리 파일이 있으면 저장소로 흡수한 뒤 symlink로 교체).
 
 **Tech Stack:** bash, jq, python3(표준 라이브러리 `ast`, `json`, `re`만), git, curl
 
@@ -1205,11 +1205,14 @@ assert_eq "0" "$CNT" "재실행: ⚠ 중복 없음"
 CC_MEMORY_STORE=/no/such/store bash "$HERE/../scripts/memory-check.sh" <<< '{}' >/dev/null && rc=0 || rc=$?
 assert_eq "0" "$rc" "저장소 없음: 정상 종료"
 
-# 항목 50건 초과 -> 검사 건너뛰고 정리 경고
+# 항목 상한(CC_MEMORY_MAX, 기본 200건) 초과 -> 검사 건너뛰고 정리 경고
+# (이 값은 Task 6 완료 후 계획 수정으로 50 -> 200 으로 올랐다. 실사용 저장소가
+# 이미 49건이라 상한 50 은 곧 검사를 조용히 꺼버린다는 게 드러났기 때문이다.
+# 같은 수정에서 stale 검사 시간 예산(CC_MEMORY_BUDGET_SEC, 기본 2초)도 추가됐다.)
 : > "$STORE/MEMORY.md"
-for i in $(seq 1 51); do echo "- [m$i](unchanged-one.md) — x" >> "$STORE/MEMORY.md"; done
+for i in $(seq 1 201); do echo "- [m$i](unchanged-one.md) — x" >> "$STORE/MEMORY.md"; done
 OUT=$(echo '{}' | bash "$HERE/../scripts/memory-check.sh")
-assert_contains "$OUT" "정리 필요" "51건: 정리 경고"
+assert_contains "$OUT" "정리 필요" "201건: 정리 경고"
 
 finish
 ```
@@ -1241,7 +1244,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 STORE="${CC_MEMORY_STORE:-$HOME/claude-memory/np-enterprise}"
 INDEX="$STORE/MEMORY.md"
-MAX_ENTRIES="${CC_MEMORY_MAX:-50}"
+MAX_ENTRIES="${CC_MEMORY_MAX:-200}"
 DEFAULT_REPO="/ssd1/home/wonseon.song/test2/np-enterprise"
 
 # stdin(훅 입력)은 쓰지 않는다. 읽지 않고 그대로 둔다 —
@@ -1346,7 +1349,7 @@ git commit -m "feat(note): SessionStart stale 감지
 
 - py + 심볼이면 AST 비교, 그 외는 파일 단위 폴백
 - 매 실행마다 기존 표시를 지우고 재계산해 멱등
-- 50건 초과 시 검사 건너뛰고 정리 경고"
+- 200건(CC_MEMORY_MAX) 초과 시 검사 건너뛰고 정리 경고"
 ```
 
 ---
@@ -1635,6 +1638,20 @@ fi
 echo ""
 link_memory_dirs
 ```
+
+> **계획 수정 (사후, 최종 리뷰 대응):** 위 스니펫의 `elif [ -d "$target" ]` 분기 —
+> "기존 실디렉터리가 있으면 백업 후 symlink로 교체" — 는 대상 디렉터리에 진짜 메모리
+> 파일이 들어 있는 경우를 그대로 재현했다: 리뷰어가 새 서버 시나리오에서 실제로
+> 51개 메모리 파일이 통째로 `.bak` 로 옮겨지고 저장소는 빈 채로 symlink 되는 사고를
+> 재현했다 — 메모리가 로드되지 않는데도 아무 경고 없이 "성공"으로 보였다.
+>
+> 최종 구현은 **백업이 아니라 흡수(adopt)** 한다: 대상 디렉터리 안의 파일 중 저장소에
+> 아직 없는 것은 저장소로 옮기고, 이름은 같은데 내용이 다른 파일만 덮어쓰지 않고
+> `.bak` 에 남겨 명시적으로 보고한다. `MEMORY.md` 인덱스는 클로버가 아니라 병합한다
+> (들어오는 쪽의 `- [...]` 줄 중 저장소에 없는 것만 이어붙인다). 그런 다음에만 원본
+> 디렉터리를 지우고 symlink 로 교체한다. 목표("어디서나 같은 저장소 하나가 보인다")는
+> 그대로지만, 그 목표를 메모리를 숨기지 않고 달성한다. 구현은
+> `setup.sh`(`link_memory_dirs`)와 `note/tests/test_setup_memory.sh`를 참고.
 
 - [ ] **Step 5: 테스트 통과 확인**
 

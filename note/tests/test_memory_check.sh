@@ -83,6 +83,7 @@ assert_contains "$IDX" "- ⚠ 삭제됨 [삭제됨](deleted-one.md)" "심볼 근
 
 assert_contains "$OUT" "additionalContext" "SessionStart JSON 출력"
 assert_contains "$OUT" "재확인 필요 3건" "요약: 3건"
+assert_contains "$OUT" "근거 없음 1건" "요약: 근거 없음(no-commit.md) 1건 별도 명시"
 
 # 두 번 돌려도 파일 전체가 바이트 단위로 동일하다 (⚠ 및 ⚠ 삭제됨 모두 재계산 전 벗겨져야 함)
 IDX_RUN1=$(cat "$STORE/MEMORY.md")
@@ -121,5 +122,52 @@ OUT=$(echo '{}' | bash "$HERE/../scripts/memory-check.sh")
 AFTER_CAP=$(cat "$STORE/MEMORY.md")
 assert_contains "$OUT" "정리 필요" "201건(상한 200 초과): 정리 경고"
 assert_eq "$BEFORE_CAP" "$AFTER_CAP" "201건: 상한 초과로 스킵 -> 표시 변경 없음"
+
+# --- Finding 1 회귀: 인덱스 마지막 줄에 개행이 없어도 항목이 사라지지 않는다 ---
+# `read -r line` 는 개행 없는 마지막 줄에서 nonzero 로 리턴하므로, 가드 없이
+# `while IFS= read -r line; do ... done < "$INDEX"` 로 돌리면 그 줄은 루프 몸통을
+# 아예 타지 않아 TMP 에 쓰이지 않고, mv 로 통째 사라진다.
+printf -- '- [첫째](unchanged-one.md) — 그대로\n- [둘째](changed-one.md) — 마지막 줄, 개행 없음' > "$STORE/MEMORY.md"
+echo '{}' | bash "$HERE/../scripts/memory-check.sh" >/dev/null
+IDX_NONL=$(cat "$STORE/MEMORY.md")
+assert_contains "$IDX_NONL" "[첫째](unchanged-one.md)" "trailing newline 없음: 첫 항목 보존"
+assert_contains "$IDX_NONL" "[둘째](changed-one.md)" "trailing newline 없음: 마지막(개행 없는) 항목 보존"
+LINES_NONL=$(printf '%s' "$IDX_NONL" | grep -cE '^- ')
+assert_eq "2" "$LINES_NONL" "trailing newline 없음: 항목 2건 모두 살아남음"
+
+# --- Finding 2 회귀: Source 줄 뒤에 백틱이 더 있어도 커밋을 정확히 추출한다 ---
+# 그리디 (.+) 는 줄의 마지막 백틱까지 삼켜, `**Source:** \`a\` (참고: \`b\`)` 같은
+# 줄에서 커밋 추출이 조용히 실패하고 이 항목이 검사 없이 통과해버린다.
+cat > "$STORE/greedy-source.md" <<EOF
+---
+name: greedy-source
+description: greedy-source 설명
+metadata:
+  type: project
+---
+
+본문 — Source 줄 뒤에 참고용 백틱이 하나 더 붙어 있다.
+
+**Source:** \`mod.py#volatile@$BASE\` (참고: \`other.py\` 도 봄)
+**Verified:** 2026-07-01
+EOF
+printf -- '- [그리디](greedy-source.md) — volatile 은 실제로 바뀜\n' > "$STORE/MEMORY.md"
+echo '{}' | bash "$HERE/../scripts/memory-check.sh" >/dev/null
+IDX_GREEDY=$(cat "$STORE/MEMORY.md")
+assert_contains "$IDX_GREEDY" "- ⚠ [그리디](greedy-source.md)" "greedy Source: 뒤 백틱 있어도 커밋 정확 추출, ⚠ 붙음"
+
+# --- Finding 3 회귀: 근거 없는 항목 수를 세어 별도 문구로 알린다 ---
+# Source 가 없거나 커밋을 추출할 수 없는 항목은 stale 검사 대상이 아니다.
+# 표시가 안 붙는 것과 "검사해서 이상 없음"이 구분되지 않으면, 사용자는
+# 지켜보지 않는 메모리도 지켜지고 있다고 착각하게 된다.
+mk no-source-a "mod.py#stable"
+mk no-source-b "mod.py#stable"
+cat > "$STORE/MEMORY.md" <<'EOF'
+- [정상](unchanged-one.md) — 그대로
+- [근거1](no-source-a.md) — Source 있지만 커밋 없음
+- [근거2](no-source-b.md) — Source 있지만 커밋 없음
+EOF
+OUT_NS=$(echo '{}' | bash "$HERE/../scripts/memory-check.sh")
+assert_contains "$OUT_NS" "근거 없음 2건" "근거 없음 카운트: 정확히 2건, stale 요약과 구분되는 문구"
 
 finish

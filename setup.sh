@@ -50,19 +50,62 @@ link_memory_dirs() {
     if [ -L "$target" ]; then
       ln -sfn "$MEMORY_STORE" "$target" || { echo "  ⚠️  $(basename "$p") (symlink 갱신 실패)"; continue; }
     elif [ -d "$target" ]; then
+      # 실제 메모리 파일이 들어 있는 디렉터리다. 예전에는 이걸 통째로 .bak 로
+      # 치우고 빈 저장소를 symlink 로 걸었다 — 그 결과 메모리 51개가 조용히
+      # displaced 되어 다시는 로드되지 않는 사고가 실제로 났다. 이제는 displace
+      # 대신 adopt 한다: 저장소에 아직 없는 파일은 저장소로 흡수하고, 이름은
+      # 같은데 내용이 다른 파일만 충돌로 보고 .bak 에 남긴다.
       local bak="$target.bak.$(date +%s)"
-      if ! mv "$target" "$bak" 2>/dev/null; then
-        echo "  ⚠️  $(basename "$p") (기존 디렉토리 백업 실패, 건너뜀)"
+      local adopted=0 conflicted=0 f base
+      local -a conflict_names=()
+      for f in "$target"/*; do
+        [ -f "$f" ] || continue          # 하위 디렉터리·심볼릭 링크 등은 다루지 않는다
+        base=$(basename "$f")
+        [ "$base" = "MEMORY.md" ] && continue   # 인덱스는 아래에서 별도로 병합한다
+        if [ ! -e "$MEMORY_STORE/$base" ]; then
+          cp -p "$f" "$MEMORY_STORE/$base" 2>/dev/null && adopted=$((adopted + 1))
+        elif ! cmp -s "$f" "$MEMORY_STORE/$base" 2>/dev/null; then
+          # 이름은 같은데 내용이 다르다 — 어느 쪽이 최신인지 알 수 없으므로
+          # 저장소 쪽을 덮어쓰지 않고, 원본을 백업으로 옮겨 사람이 보게 한다.
+          if mkdir -p "$bak" 2>/dev/null && mv "$f" "$bak/$base" 2>/dev/null; then
+            conflicted=$((conflicted + 1))
+            conflict_names+=("$base")
+          fi
+        fi
+        # 내용이 완전히 같으면 아무 것도 하지 않는다 — 저장소에 이미 있다.
+      done
+
+      # MEMORY.md 인덱스는 통째로 덮지 않고 병합한다. 저장소 쪽 인덱스를
+      # 클로버하면 이미 저장소에만 있던 항목이 사라진다 — 들어오는 쪽의
+      # 항목 줄(`- [...]`) 중 저장소에 아직 없는 것만 이어붙인다.
+      if [ -f "$target/MEMORY.md" ]; then
+        if [ -f "$MEMORY_STORE/MEMORY.md" ]; then
+          while IFS= read -r idxline || [ -n "$idxline" ]; do
+            case "$idxline" in
+              '- ['*)
+                grep -qxF -- "$idxline" "$MEMORY_STORE/MEMORY.md" 2>/dev/null || \
+                  printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md"
+                ;;
+            esac
+          done < "$target/MEMORY.md"
+        else
+          cp -p "$target/MEMORY.md" "$MEMORY_STORE/MEMORY.md" 2>/dev/null || true
+        fi
+      fi
+
+      if ! rm -rf "$target" 2>/dev/null; then
+        echo "  ⚠️  $(basename "$p") (흡수 후 원본 디렉터리 정리 실패, 건너뜀 — symlink 미생성)"
         continue
       fi
       ln -sfn "$MEMORY_STORE" "$target" || { echo "  ⚠️  $(basename "$p") (symlink 생성 실패)"; continue; }
-      local nfiles
-      nfiles=$(find "$bak" -type f 2>/dev/null | wc -l)
-      echo "  🔄 $(basename "$p") (dir → symlink, old backed up)"
-      echo "     ⚠️  기존 메모리 $nfiles개 파일이 옮겨졌습니다 — 새로 로드되지 않습니다!"
-      echo "     ⚠️  백업 위치: $bak"
-      echo "     ⚠️  → 이 내용을 $MEMORY_STORE 로 직접 병합해야 다시 로드됩니다."
-      displaced_backups+=("$(basename "$p")|$bak|$nfiles")
+
+      echo "  📥 $(basename "$p") (dir → symlink, 내용은 저장소로 흡수됨)"
+      [ "$adopted" -gt 0 ] && echo "     ✅ 새 파일 ${adopted}개를 저장소로 흡수"
+      if [ "$conflicted" -gt 0 ]; then
+        echo "     ⚠️  이름은 같지만 내용이 다른 파일 ${conflicted}개는 덮어쓰지 않고 백업: $bak"
+        echo "     ⚠️  → 대상: ${conflict_names[*]}"
+        displaced_backups+=("$(basename "$p")|$bak|$conflicted")
+      fi
       linked=$((linked + 1))
       continue
     elif [ -e "$target" ]; then
@@ -92,8 +135,9 @@ link_memory_dirs() {
   if [ "${#displaced_backups[@]}" -gt 0 ]; then
     echo ""
     echo "  ╔═══════════════════════════════════════════════════════════╗"
-    echo "  ║  ⚠️  기존 메모리 내용이 백업 디렉터리로 옮겨졌습니다!        ║"
-    echo "  ║      병합하지 않으면 해당 내용은 더 이상 로드되지 않습니다.  ║"
+    echo "  ║  ⚠️  일부 파일은 자동으로 병합되지 않고 백업에 남아 있습니다 ║"
+    echo "  ║      (이름은 같지만 내용이 다르거나, 통째로 옮겨진 파일)     ║"
+    echo "  ║      확인 후 필요하면 직접 저장소로 병합하세요.              ║"
     echo "  ╚═══════════════════════════════════════════════════════════╝"
     local entry name bak nfiles
     for entry in "${displaced_backups[@]}"; do

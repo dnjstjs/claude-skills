@@ -17,7 +17,10 @@ marketplace: false
 실체는 `~/claude-memory/np-enterprise/` 한 곳이다.
 `sdk`/`qa`/`backend`/`engine`/`client`/`common`/루트의 프로젝트 memory 디렉터리를
 전부 이곳으로 symlink 해두면, **어느 디렉터리에서 시작하든 같은 메모리가 로드된다.**
-(이 프로젝트별 symlink 는 현재 어떤 스크립트도 자동으로 만들어주지 않는다 — 지금은 수동으로 걸어둬야 한다.)
+이 프로젝트별 symlink 는 `setup.sh` 가 자동으로 만들고 관리한다 — 손으로 걸 필요가 없다.
+대상 자리에 이미 실제 메모리 파일이 든 디렉터리가 있으면 그 내용을 저장소로 흡수(adopt)한 뒤
+symlink 로 바꾼다: 저장소에 없는 파일은 그대로 옮기고, 이름은 같은데 내용이 다른 파일만
+덮어쓰지 않고 `.bak` 에 남겨 보고한다. `MEMORY.md` 인덱스도 클로버하지 않고 병합한다.
 경로는 `CC_MEMORY_STORE` 환경변수로 재정의할 수 있다 (`memory-check.sh` 가 읽는 기본값).
 
 기준 repo는 `~/claude-memory/np-enterprise/.repo` 에 적는다.
@@ -111,6 +114,10 @@ presigned URL은 백엔드가 발급한다. np-client는 URL을 조립하지 않
   세 경우에 쓰인다: `symbol_diff.py` 자체가 없을 때, `Source` 에 `#심볼` 이 없을 때,
   경로가 `.py` 가 아닐 때. 이 중 `symbol_diff.py` 가 없는 경우만 그 사실을 결과 메시지에 덧붙인다 —
   나머지 둘은 항목별로 조용히 파일 단위 검사로 넘어간다.
+- `Source` 줄 자체가 없거나 거기서 기준 커밋을 뽑아낼 수 없는 항목은 애초에 stale
+  검사 대상이 아니다 — 표시가 안 붙는다고 "검사해서 이상 없음"은 아니다. 이런 항목이
+  하나라도 있으면 결과 메시지에 "근거 없음 N건 — stale 검사 대상 아님"이 따로 붙는다
+  (재확인 필요/정리 필요/부분 검사 메시지와는 구분되는, 별도로 조합 가능한 문구다).
 
 ## `--check`
 
@@ -143,5 +150,6 @@ bash ~/claude-skills/note/scripts/memory-check.sh
 | `Stop` | `scripts/notify-stop.sh` | 3분 이상 걸린 턴만 Slack |
 | `SessionEnd` | `scripts/notify-session.sh` | 세션 요약 + note 누락 경고 + 세션 상태 파일(`*.turn`, `*.session`) 정리 |
 
-`~/claude-skills/setup.sh` 는 스킬 디렉터리를 `~/.claude/skills/` 에 symlink 하는 것까지만 한다.
+`~/claude-skills/setup.sh` 는 스킬 디렉터리를 `~/.claude/skills/` 에 symlink 하는 것과,
+메모리 저장소 생성 + 프로젝트별 memory symlink 연결(위 "저장 위치" 참고)까지 한다.
 위 네 훅을 `~/.claude/settings.json` 에 등록하는 것은 setup.sh 가 하지 않는, 최초 1회 수동 설정이다.
