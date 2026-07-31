@@ -15,9 +15,10 @@ marketplace: false
 ## 저장 위치
 
 실체는 `~/claude-memory/np-enterprise/` 한 곳이다.
-`sdk`/`qa`/`backend`/`engine`/`client`/`common`/루트의 프로젝트 memory 디렉터리가
-전부 이곳으로 symlink 되어 있어, **어느 디렉터리에서 시작하든 같은 메모리가 로드된다.**
-경로는 `CC_MEMORY_STORE` 환경변수로 재정의할 수 있다 (스크립트 전체의 기본값).
+`sdk`/`qa`/`backend`/`engine`/`client`/`common`/루트의 프로젝트 memory 디렉터리를
+전부 이곳으로 symlink 해두면, **어느 디렉터리에서 시작하든 같은 메모리가 로드된다.**
+(이 프로젝트별 symlink 는 현재 어떤 스크립트도 자동으로 만들어주지 않는다 — 지금은 수동으로 걸어둬야 한다.)
+경로는 `CC_MEMORY_STORE` 환경변수로 재정의할 수 있다 (`memory-check.sh` 가 읽는 기본값).
 
 기준 repo는 `~/claude-memory/np-enterprise/.repo` 에 적는다.
 없으면 `/ssd1/home/wonseon.song/test2/np-enterprise` 를 쓴다.
@@ -94,12 +95,16 @@ presigned URL은 백엔드가 발급한다. np-client는 URL을 조립하지 않
 | 표시 | 의미 |
 |---|---|
 | `⚠ ` | `Source`의 심볼(또는 파일)이 기준 커밋 이후 바뀜 — 재확인 필요 |
-| `⚠ 삭제됨 ` | `Source`의 파일 자체가 HEAD 에 없음 — 근거가 사라짐 |
+| `⚠ 삭제됨 ` | `Source`의 파일이 HEAD 에 없거나, 파일은 있지만 참조한 심볼이 사라졌거나, 파일이 더 이상 파싱되지 않음(`SyntaxError`) |
 
+- 위 세 경우 모두 `symbol_diff.py` 가 `MISSING`(rc=2) 을 반환해 동일하게 `⚠ 삭제됨` 으로 표시된다.
+  파일을 열어봐도 멀쩡해 보인다면 파일 삭제가 아니라 심볼 자체가 지워졌는지부터 의심한다.
 - 메모리가 상한(`CC_MEMORY_MAX`, 기본 **50**건)을 넘으면 stale 검사를 통째로 건너뛰고
   "정리 필요" 메시지만 띄운다. 항목이 늘어나면 오래된/중복된 메모리를 먼저 정리한다.
-- `symbol_diff.py` 가 없으면 심볼 단위 비교를 하지 않고 파일 단위(파일이 HEAD 에 있는지,
-  기준 커밋 이후 그 경로에 커밋이 있는지)로만 검사하며, 그 사실을 결과 메시지에 덧붙인다.
+- 파일 단위 폴백(파일이 HEAD 에 있는지, 기준 커밋 이후 그 경로에 커밋이 있는지만 검사)은
+  세 경우에 쓰인다: `symbol_diff.py` 자체가 없을 때, `Source` 에 `#심볼` 이 없을 때,
+  경로가 `.py` 가 아닐 때. 이 중 `symbol_diff.py` 가 없는 경우만 그 사실을 결과 메시지에 덧붙인다 —
+  나머지 둘은 항목별로 조용히 파일 단위 검사로 넘어간다.
 
 ## `--check`
 
@@ -130,6 +135,7 @@ bash ~/claude-skills/note/scripts/memory-check.sh
 | `SessionStart` | `scripts/memory-check.sh` | 근거가 바뀐 메모리에 `⚠` |
 | `UserPromptSubmit` | `scripts/stamp-start.sh` | 턴/세션 시작 시각 기록 |
 | `Stop` | `scripts/notify-stop.sh` | 3분 이상 걸린 턴만 Slack |
-| `SessionEnd` | `scripts/notify-session.sh` | 세션 요약 + note 누락 경고 |
+| `SessionEnd` | `scripts/notify-session.sh` | 세션 요약 + note 누락 경고 + 세션 상태 파일(`*.turn`, `*.session`) 정리 |
 
-설치는 `~/claude-skills/setup.sh` 가 한다.
+`~/claude-skills/setup.sh` 는 스킬 디렉터리를 `~/.claude/skills/` 에 symlink 하는 것까지만 한다.
+위 네 훅을 `~/.claude/settings.json` 에 등록하는 것은 setup.sh 가 하지 않는, 최초 1회 수동 설정이다.
