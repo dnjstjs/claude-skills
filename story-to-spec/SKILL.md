@@ -13,9 +13,31 @@ Jira 스토리를 **코드베이스 맥락과 함께 깊이 분석**한 뒤, Age
 
 기존 `/create-tasks-from-story`가 AC를 기계적으로 매핑하는 반면, 이 스킬은:
 - 스토리의 요구사항이 **현재 코드 구조에서 실현 가능한지** 검증
-- SDK/Backend/외부 모듈의 **영향 범위를 코드 레벨로 파악**
+- Client/Backend/Engine/Common/외부 모듈(+레거시 sdk)의 **영향 범위를 코드 레벨로 파악**
 - 사용자에게 **놓치기 쉬운 부분을 질문**하여 모호함 제거
 - 최종 티켓에 **변경 대상 파일, 참고 패턴, 아키텍처 레이어별 작업**을 포함
+
+## 대상 구조 (필수 선행 지식)
+
+np-enterprise는 phase 2에서 `sdk`를 3패키지로 분리했다. **신구조가 기본이다:**
+
+```
+np-client (client/src/np_client/)  ──HTTP──▶  backend (backend/src/pynp/)
+   thin CLI, core-free                          API·DB·오케스트레이션
+                                                     │ event
+                                                     ▼
+                                        np-engine (engine/src/np_engine/)
+                                          compute, core 허용, 이벤트 소비
+              np-common (common/src/np_common/) — 이벤트·DTO 계약 공유
+
+[legacy] sdk/src/ — 이관 원본. 아직 살아있음. 읽기 전용 (명시적 sdk 티켓일 때만 수정)
+```
+
+> **Phase 1 시작 전에 반드시 읽는다:**
+> `~/.claude/skills/story-to-spec/references/np-enterprise-structure.md`
+> (폴백: `~/claude-skills/story-to-spec/references/np-enterprise-structure.md`)
+>
+> 패키지 지도, 키워드→경로 라우팅, 귀속 판정 트리, 패키지별 규율, `Module:` 허용값이 여기 있다.
 
 ## 사용법
 
@@ -35,6 +57,10 @@ Jira 스토리를 **코드베이스 맥락과 함께 깊이 분석**한 뒤, Age
 ## 전체 흐름
 
 ```
+Phase 0: 구조 참조 로딩 (필수)
+  └─ references/np-enterprise-structure.md 읽기 (패키지 지도·라우팅·귀속 판정·Module 허용값)
+           │
+           ▼
 Phase 1: EXPLORE (대화형 — 요구사항 층위)
   ├─ 1-0. 소스 수집 (스토리 + Confluence/spec MD/로컬 .md) → 통합 소스맵
   ├─ 1-1. 소스 읽기 & 요구사항 파싱 (출처별 traceability)
@@ -68,6 +94,10 @@ Phase 2: SPEC & TICKET (자동)
 3. 범위 경계 — AC엔 없지만 영향받는 부분 발견, 이번 스코프에 포함할지
 4. 요구사항 우선순위 / 스코프 컷 — 뭘 넣고 뭘 뺄지
 5. 도메인·비즈니스 규칙 — 개발자/기획이 스토리보다 잘 아는 맥락
+6. **패키지 귀속 / 책임 경계** — 이 작업이 client냐 engine냐, thin/thick 어디까지냐,
+   engine 호출로 넘길 것이냐. repo `client/docs/migration-charter.md` 원칙 #5·#6이
+   **"경계 결정은 위임 금지 → escalate"**로 명시한 사안이므로 코드 결정이 아니라 요구사항으로 취급한다.
+   (단, core 의존이 명백하거나 순수 CLI 옵션 추가 수준이면 묻지 않고 판정 — 참조 파일 §4 예외)
 
 → 이런 지점을 만나면 **분석을 계속하기 전에 그 자리에서 즉시**, `AskUserQuestion`으로 **한 번에 하나씩** 묻는다. 요약에 몰아서 묻지 않는다.
 
@@ -89,6 +119,8 @@ Phase 2: SPEC & TICKET (자동)
 | "소스 다 읽었으니 알아서 통합" | 소스 간 충돌이 보이면 멈추고 어느 게 맞는지 물어라 |
 | "AC에 없으니 스킵" | 영향 범위에 걸리면 AC에 없어도 물어라 |
 | "질문 모아서 마지막 요약에" | 갈림길에서 즉시 하나씩 물어라. 요약에 몰면 이미 늦다 |
+| "client냐 engine이냐, 내가 정하면 되지" | **책임 경계는 escalate 대상** (charter #5·#6). 오분류하면 엉뚱한 패키지를 개조한다 |
+| "예전처럼 sdk/에 넣으면 되겠네" | sdk는 레거시 읽기 전용. 신규 작업은 client/backend/engine/common |
 
 ### Step 1-0: 소스 수집
 
@@ -143,7 +175,7 @@ requirements:
   acceptance_criteria:
     - text: "AC1: ..."       # 출처: spec-md (스토리보다 상세)
     - text: "AC2: ..."       # 출처: story
-  modules_mentioned: [SDK, Backend, ...]
+  modules_mentioned: [Client, Backend, Engine, Common, SDK(legacy), ...]
   participants: [...]
 
 source_conflicts:            # 소스 간 어긋난 지점 → 의사결정 지점 후보
@@ -159,7 +191,7 @@ source_conflicts:            # 소스 간 어긋난 지점 → 의사결정 지�
 루프 한 바퀴:
 
 ```
-for 각 탐색 영역 (SDK / Backend / 외부 모듈 / 소스 충돌 지점):
+for 각 탐색 영역 (Client / Backend / Engine / Common / 외부 모듈 / 레거시 sdk 대조 / 소스 충돌 지점):
     1. 코드/소스를 읽어 영향 범위 파악        (아래 1-2-a ~ 1-2-c)
     2. 요구사항 의사결정 지점이 있는가?
          ├─ 있으면 → 즉시 AskUserQuestion (하나씩) → 결정 로그 기록
@@ -171,49 +203,79 @@ for 각 탐색 영역 (SDK / Backend / 외부 모듈 / 소스 충돌 지점):
 
 #### 1-2-a. 대상 영역 식별
 
-스토리의 Goal/AC에서 키워드를 추출하여 탐색 범위를 결정:
+스토리의 Goal/AC에서 키워드를 추출하여 탐색 범위를 결정한다.
+**신구조 열이 기본이고, 레거시 열은 "기존에 어떻게 동작했나"를 대조할 때만 읽는다.**
 
-| 키워드 예시 | 탐색 대상 |
-|------------|----------|
-| CLI 명령어, `np run`, `np workspace` | `sdk/src/adapter/inbound/cli/` |
-| API, 엔드포인트, 백엔드 | `backend/src/pynp/` |
-| quantize, optimize, profile | `sdk/src/` + 외부 모듈 (np_quantizer, np_graph_optimizer 등) |
-| 모델, 데이터셋, 실험 | `sdk/src/domain/`, `backend/src/pynp/domain/` |
-| 보고서, 리포트 | `sdk/src/` (report 도메인) + `backend/` (report API) |
+| 키워드 예시 | 신구조 (기본) | 레거시 대조 |
+|------------|--------------|------------|
+| CLI 명령어, `np run`, `np workspace` | `client/src/np_client/adapter/inbound/cli/` | `sdk/src/adapter/inbound/cli/` |
+| 출력 포맷·렌더링·터미널 UX | `client/src/np_client/adapter/inbound/cli/` | `sdk/src/adapter/inbound/cli/` |
+| backend 호출·API 클라이언트 | `client/src/np_client/adapter/outbound/backend_http/` | `sdk/src/adapter/outbound/` |
+| API, 엔드포인트, 인증, 잡 생명주기 | `backend/src/pynp/` | (동일) |
+| quantize, optimize, profile, evaluate | `engine/src/np_engine/` + 외부 모듈 (np_quantizer, np_graph_optimizer 등) | `sdk/src/` |
+| worker, 이벤트 소비, oneshot, KEDA | `engine/src/np_engine/adapter/inbound/{worker,message}/` | — |
+| 이벤트 스키마, 공유 DTO 계약 | `common/src/np_common/{messaging,auth,fingerprint}/` | `sdk/src/common/` |
+| 모델, 데이터셋, 실험 | `client/src/np_client/domain/`, `backend/src/pynp/domain/`, `engine/src/np_engine/domain/` | `sdk/src/domain/` |
+
+> 전체 라우팅 표는 참조 파일 §3. 어느 패키지 소속인지 애매하면 §4 판정 트리 →
+> **경계 판단이 필요하면 질문 유형 F로 escalate.**
 
 #### 1-2-b. 코드 탐색 수행
 
-**SDK 분석** (스토리가 SDK 관련일 때):
-1. 관련 도메인 디렉토리 구조 파악 (`sdk/src/domain/{domain}/`)
-2. 기존 UseCase/Port/Service 목록 확인
-3. CLI 커맨드 구조 확인 (`sdk/src/adapter/inbound/cli/{domain}/`)
-4. Application Service 확인 (`sdk/src/application/{domain}/`)
-5. 아키텍처 가이드 참조 (`sdk/CLAUDE.md`, `sdk/src/CLAUDE.md`)
+**Client 분석** (스토리가 CLI·사용자 진입점 관련일 때):
+1. 관련 도메인 디렉토리 구조 파악 (`client/src/np_client/domain/{domain}/`)
+2. 기존 UseCase/Port/Service 목록 확인 (`client/src/np_client/application/{domain}/{action}/`)
+3. CLI 커맨드 + wiring 구조 확인 (`client/src/np_client/adapter/inbound/cli/{domain}/commands/`)
+4. backend 호출 어댑터 확인 (`client/src/np_client/adapter/outbound/backend_http/`)
+5. **core-free 위반 여부 확인** — 이 작업에 torch·`np_*` core가 필요하면 client가 아니라
+   engine 소속이다. 판단이 걸리면 질문 유형 F로 escalate
+6. 아키텍처 가이드 참조 (`client/README.md`, `client/docs/migration-charter.md`)
 
-**Backend 분석** (스토리가 Backend 관련일 때):
+**Backend 분석** (스토리가 API·DB·오케스트레이션 관련일 때):
 1. 관련 도메인 Entity/DTO 확인 (`backend/src/pynp/domain/`)
 2. Controller/Router 확인 (`backend/src/pynp/application/`)
 3. DB 스키마 영향 확인 (ERD, migration)
-4. 아키텍처 가이드 참조 (`backend/CLAUDE.md`)
+4. 이벤트 발행/구독 영향 확인 (`backend/src/pynp/application/messaging/`)
+5. 아키텍처 가이드 참조 (`backend/CLAUDE.md`)
+
+**Engine 분석** (스토리가 compute·워커·이벤트 소비 관련일 때):
+1. 관련 도메인/유스케이스 확인 (`engine/src/np_engine/domain/`, `application/{domain}/{action}/`)
+2. 이벤트 핸들러·consumer 확인 (`engine/src/np_engine/adapter/inbound/{worker,message}/`)
+3. **진입점(`ENGINE_ROLE`) 영향 판단** — worker / api / oneshot 중 어디에 걸리는지.
+   oneshot 관련이면 `adapter/inbound/message/one_shot_message_runner.py` docstring 확인
+4. core·backend·broker 어댑터 확인 (`engine/src/np_engine/adapter/outbound/`)
+5. 아키텍처 가이드 참조 (`engine/README.md`)
+
+**Common 분석** (이벤트·계약 변경이 걸릴 때):
+1. 공유 계약 확인 (`common/src/np_common/{messaging,auth,fingerprint}/`)
+2. **소비처 전수 파악** — client·backend·engine 중 누가 이 계약을 쓰는지 (`grep`)
+3. 계약 변경은 티켓 순서상 **가장 먼저** 온다 (참조 파일 §6-2)
+
+**레거시 sdk 대조 분석** (기존 동작·parity 근거가 필요할 때):
+- 신구조에 아직 이관되지 않은 기능이면 `sdk/src/`에서 원본 동작을 확인
+- **읽기 전용.** 수정 대상으로 올리려면 스토리가 명시적으로 sdk를 지목해야 한다
+- 이관 원칙(parity / deviation log)은 `client/docs/migration-charter.md` 참조
 
 **외부 모듈 분석** (np- 패키지 연관 시):
 - 스토리가 quantize/optimize/profile/evaluate 등 핵심 기능을 언급하면
 - 관련 외부 모듈의 호스트 경로 또는 컨테이너 경로를 확인
-- SDK에서 해당 모듈을 호출하는 진입점 파악 (`grep`으로 import 추적)
+- engine에서 해당 모듈을 호출하는 진입점 파악 (`grep`으로 import 추적).
+  레거시 경로면 `sdk/src/`에서 대조
 
 #### 1-2-c. 분석 결과 내부 축적
 
 ```
 impact_analysis:
-  sdk:
+  client:
     domains_affected: [workspace, project]
     files_to_modify:
-      - sdk/src/domain/workspace/port/workspace_port.py (새 메서드 추가)
-      - sdk/src/application/workspace/init/workspace_init_service.py (로직 변경)
+      - client/src/np_client/domain/workspace/port/workspace_port.py (새 메서드 추가)
+      - client/src/np_client/application/workspace/init/workspace_init_service.py (로직 변경)
     files_to_create:
-      - sdk/src/domain/workspace/dto/xxx_result.py
+      - client/src/np_client/domain/workspace/dto/xxx_result.py
     architecture_layer: [Domain, Application, Adapter]
-    reference_impl: "workspace 도메인이 가장 정합적 — 패턴 참고"
+    core_free_ok: true                    # torch·np_* 의존 없음 — 위반이면 engine으로 재분류
+    reference_impl: "health/ready 수직 슬라이스 — 새 커맨드는 이 흐름 복제"
 
   backend:
     domains_affected: [experiment]
@@ -221,11 +283,31 @@ impact_analysis:
       - backend/src/pynp/domain/experiment/entity/experiment.py
     db_schema_change: true
     api_endpoints_affected: [POST /api/v2/experiments]
+    events_affected: []
+
+  engine:
+    domains_affected: [optimization]
+    files_to_modify:
+      - engine/src/np_engine/application/optimization/quantize/quantize_service.py
+    engine_role_affected: [worker, oneshot]   # api / worker / oneshot 중 영향받는 진입점
+    event_handlers_affected:
+      - engine/src/np_engine/adapter/inbound/message/run_processing_event_handler.py
+
+  common:
+    contracts_affected: [messaging.run_processing_event]
+    consumers: [backend, engine]          # 계약 변경 시 동시 영향 — 티켓 순서상 먼저
+    files_to_modify:
+      - common/src/np_common/messaging/... (스키마 필드 추가)
+
+  legacy_sdk:                             # 읽기 전용 대조 (수정 대상 아님)
+    referenced_for: "이관 전 quantize 옵션 파싱 동작 확인"
+    files_read:
+      - sdk/src/domain/optimization/service/quantize_service.py
 
   external_modules:
     - name: np_quantizer_v2
       reason: "스토리에서 quantize 설정 변경 언급"
-      entry_point: sdk/src/domain/optimization/service/quantize_service.py
+      entry_point: engine/src/np_engine/application/optimization/quantize/quantize_service.py
 ```
 
 그리고 사용자와의 대화에서 확정된 요구사항 결정을 **결정 로그**에 누적한다. 이게 Phase 2 티켓에 그대로 반영된다:
@@ -240,10 +322,15 @@ decision_log:
     question: "입력 파일 없을 때 동작?"
     decision: "에러 대신 빈 리포트 반환"
     source: 사용자 (도메인 규칙, 스토리·spec 모두 미언급)
+  - topic: "패키지 귀속 — 리포트 집계 위치"      # 질문 유형 F
+    question: "집계를 client에서 할까요, engine 결과를 backend가 모아줄까요?"
+    decision: "backend 집계 (client는 렌더링만 — thin 유지)"
+    source: 사용자 (책임 경계, charter #6)
 
 code_decisions:                        # 물어보지 않고 Claude가 정한 구현 결정 (기록만)
-  - "workspace 도메인 패턴 따라 Application Service 신규 생성"
-  - "레거시 report.py는 이관 없이 기존 패턴 유지 (스코프 최소화)"
+  - "health/ready 수직 슬라이스 패턴 따라 Application Service 신규 생성"
+  - "quantize는 torch 의존이 명백 → engine 귀속 (참조 파일 §4 예외, 질문 생략)"
+  - "레거시 sdk/report.py는 이관 없이 읽기 전용 대조만 (스코프 최소화)"
 ```
 
 ### Step 1-3: 요구사항 질문 (EXPLORE 루프 안에서 수시로)
@@ -271,6 +358,17 @@ code_decisions:                        # 물어보지 않고 Claude가 정한 �
 **E. 도메인·비즈니스 규칙:**
 - "{도메인 개념}의 정확한 규칙이 소스에 없습니다. 실제로는 어떻게 동작해야 하나요? (개발자/기획이 아는 맥락)"
 
+**F. 패키지 귀속 / 책임 경계 (⚠️ 결정하지 말고 escalate — charter #5·#6):**
+- "이 작업은 CLI 진입점이라 client인데, 실제 연산이 core를 타면 engine으로 넘겨야 합니다.
+  `{작업}`은 client에서 끝내나요, engine 호출로 가나요?"
+- "`{기능}`이 client·engine 양쪽에 걸칩니다. 계약(`np-common`)부터 정의하고 갈까요?"
+- "`{집계/가공}`을 client가 할지 backend가 할지에 따라 thin/thick 경계가 달라집니다. 어느 쪽인가요?"
+- "이 기능은 아직 `sdk/`에만 있습니다. 이번에 client로 이관할까요, sdk에서 고칠까요?"
+
+> **F를 묻지 않아도 되는 경우** (참조 파일 §4 예외): core 의존이 명백(torch 필요 → engine),
+> 순수 CLI 옵션 추가·출력 문구 변경(→ client), 순수 엔드포인트·스키마 변경(→ backend).
+> 이때는 판정 후 `code_decisions`에 근거만 기록한다.
+
 **❌ 묻지 않는다 (Claude가 알아서 — 훅이 품질 보장):**
 - 어느 레이어에 둘지, A/B 구현 방식, 레거시 vs 이관, 파일 구조/네이밍 등 코드 구현 세부.
   이런 건 `code_decisions`에 근거만 기록하고 넘어간다.
@@ -283,27 +381,33 @@ code_decisions:                        # 물어보지 않고 Claude가 정한 �
   스토리 영향 범위
   ════════════════════════════════════════
 
-  SDK                          Backend
-  ┌─────────────────┐          ┌──────────────┐
-  │ Domain          │          │ Domain       │
-  │  └ workspace    │          │  └ experiment │
-  │     └ port ★    │          │     └ entity ★│
-  │                 │          │              │
-  │ Application     │          │ Application  │
-  │  └ workspace    │          │  └ controller★│
-  │     └ init ★    │          │              │
-  │                 │          │ DB Schema ★  │
-  │ Adapter (CLI)   │          └──────────────┘
-  │  └ workspace    │
-  │     └ init ★    │
-  └─────────────────┘
-           │
-           ▼
-  External Module
-  ┌─────────────────┐
-  │ np_quantizer_v2 │
-  │  └ (호출만, 수정X)│
-  └─────────────────┘
+  np-client                    backend                      np-engine
+  ┌─────────────────┐          ┌──────────────┐             ┌──────────────────┐
+  │ Domain          │  HTTP    │ Domain       │   event     │ Domain           │
+  │  └ workspace    │ ───────▶ │  └ experiment│  ────────▶  │  └ optimization  │
+  │     └ port ★    │          │     └ entity★│  ◀────────  │                  │
+  │                 │          │              │   (상태)    │ Application      │
+  │ Application     │          │ Application  │             │  └ quantize ★    │
+  │  └ workspace    │          │  └ controller★│            │                  │
+  │     └ init ★    │          │  └ messaging │             │ Adapter(inbound) │
+  │                 │          │              │             │  └ message ★     │
+  │ Adapter(in/CLI) │          │ DB Schema ★  │             │     (worker,     │
+  │  └ workspace ★  │          └──────────────┘             │      oneshot)    │
+  │ Adapter(out)    │                                       │ Adapter(outbound)│
+  │  └ backend_http★│                                       │  └ core 호출     │
+  └─────────────────┘                                       └──────────────────┘
+        core-free 유지                                            core 허용
+                          │
+                          ▼
+              np-common (계약) ★
+              └ messaging 스키마 — 소비처: backend, engine
+
+  ─────────────────────────────────────────────────────────────
+  External Module          [legacy] sdk/src/
+  ┌─────────────────┐      ┌──────────────────┐
+  │ np_quantizer_v2 │      │ 이관 전 동작 대조 │
+  │  └ (호출만,수정X)│      │  └ (읽기 전용)    │
+  └─────────────────┘      └──────────────────┘
 
   ★ = 변경 필요
 ```
@@ -329,25 +433,31 @@ Explore 결과를 구조화하여 제시한다. **"제가 이렇게 정했습니
 |------|------|-----------|
 | 출력 포맷 | JSON 기본 + --format table | spec-md (확인함) |
 | 빈 입력 처리 | 빈 리포트 반환 | 사용자 (도메인 규칙) |
+| 패키지 귀속 — 집계 위치 | backend 집계, client는 렌더링만 | 사용자 (책임 경계, charter #6) |
 
 ### 🤖 코드 구현 결정 (Claude가 결정 — 참고용)
-- workspace 도메인 패턴 따라 Application Service 신규 생성
-- 레거시 report.py는 이관 없이 기존 패턴 유지
+- health/ready 수직 슬라이스 패턴 따라 Application Service 신규 생성
+- quantize는 torch 의존 명백 → engine 귀속 (질문 생략, §4 예외)
+- 레거시 `sdk/report.py`는 읽기 전용 대조만
 
 ### 영향 범위
-| 영역 | 변경 대상 | 유형 |
-|------|----------|------|
-| SDK Domain | workspace port | 메서드 추가 |
-| SDK Application | workspace init service | 로직 변경 |
-| SDK CLI | workspace init command | 옵션 추가 |
-| Backend | experiment entity | 컬럼 추가 |
-| DB Schema | experiments 테이블 | ALTER TABLE |
+| 패키지 | 영역 | 변경 대상 | 유형 |
+|--------|------|----------|------|
+| Client | Domain | workspace port | 메서드 추가 |
+| Client | Application | workspace init service | 로직 변경 |
+| Client | Adapter (CLI) | workspace init command | 옵션 추가 |
+| Backend | Domain | experiment entity | 컬럼 추가 |
+| Backend | DB Schema | experiments 테이블 | ALTER TABLE |
+| Engine | Adapter (message) | run processing handler | 필드 소비 |
+| Common | messaging 계약 | run_processing_event | 필드 추가 (소비처: backend, engine) |
+| ~~sdk~~ | (레거시) | — | 읽기 전용 대조만 |
 
 ### ⚠️ 남은 열린 질문 (있으면)
 - {아직 확정 못한 요구사항 — 여기서 마저 묻는다}
 
 ### 티켓 분할 방향
-- SDK 티켓 N개 / Backend 티켓 M개 / (필요 시) DB 마이그레이션 1개
+- Common 계약 1개 → Backend N개 → Client M개 ∥ Engine K개 / (필요 시) DB 마이그레이션 1개
+- (계약 우선 순서 — 참조 파일 §6-2)
 
 이 결정과 방향으로 티켓을 생성할까요?
 ```
@@ -378,11 +488,15 @@ Phase 1의 분석 결과를 바탕으로 내부적으로 설계 방향을 정리
 
 #### 티켓 분할 원칙
 
-1. **SDK와 Backend는 반드시 분리** — 같은 AC라도 SDK/Backend 각각 별도 티켓
-2. **DB 스키마 변경은 별도 티켓** — 마이그레이션 절차가 다름
-3. **아키텍처 레이어 단위로 묶기** — 한 티켓이 Domain+Application+Adapter를 모두 포함 가능 (단, 너무 크면 분할)
-4. **구현 순서 표시** — 티켓 Description에 권장 구현 순서 명시 (Jira 링크는 생성하지 않음)
-5. **하나의 티켓은 1-3일 내 완료 가능한 크기**
+1. **패키지 경계마다 반드시 분리** — 같은 AC라도 Client / Backend / Engine / Common 각각 별도 티켓
+2. **크로스 패키지 기능은 계약 우선 순서** — `Common(계약) → Backend(API) → Client(CLI) ∥ Engine(worker)`
+   (계약이 정해지면 Client와 Engine은 병렬 가능)
+3. **DB 스키마 변경은 별도 티켓** — 마이그레이션 절차가 다름
+4. **아키텍처 레이어 단위로 묶기** — 한 티켓이 Domain+Application+Adapter를 모두 포함 가능 (단, 너무 크면 분할)
+5. **구현 순서 표시** — 티켓 Description에 권장 구현 순서 명시 (Jira 링크는 생성하지 않음)
+6. **하나의 티켓은 1-3일 내 완료 가능한 크기**
+7. **Common 계약 티켓은 소비처를 명시** — client·backend·engine 중 누가 영향받는지 특이사항에 기록
+8. **레거시 sdk 티켓은 명시적일 때만** — 스토리가 sdk를 지목하지 않았다면 만들지 않는다
 
 #### 강화된 티켓 Description 템플릿
 
@@ -410,39 +524,60 @@ Phase 1의 분석 결과를 바탕으로 내부적으로 설계 방향을 정리
 
 ### 변경 대상
 
+> 경로는 해당 패키지 기준으로 쓴다 (Client 예시):
+
 | 레이어 | 파일 | 변경 내용 |
 |--------|------|----------|
-| Domain | `sdk/src/domain/{domain}/port/{port}.py` | `{method_name}()` 메서드 추가 |
-| Application | `sdk/src/application/{domain}/{usecase}/{service}.py` | 신규 생성 |
-| Adapter | `sdk/src/adapter/inbound/cli/{domain}/commands/{cmd}.py` | 신규 커맨드 |
+| Domain | `client/src/np_client/domain/{domain}/port/{port}.py` | `{method_name}()` 메서드 추가 |
+| Application | `client/src/np_client/application/{domain}/{action}/{service}.py` | 신규 생성 |
+| Adapter (in) | `client/src/np_client/adapter/inbound/cli/{domain}/commands/{cmd}.py` | 신규 커맨드 |
+| Adapter (out) | `client/src/np_client/adapter/outbound/backend_http/{client}.py` | backend 호출 추가 |
+
+<!-- Engine 티켓이면: engine/src/np_engine/{domain,application,adapter/inbound/{api,worker,message},adapter/outbound}/
+     Backend 티켓이면: backend/src/pynp/{domain,application}/
+     Common 티켓이면: common/src/np_common/{messaging,auth,fingerprint}/ -->
 
 ### 구현 가이드
 
-* 아키텍처: {해당 영역의 아키텍처 규칙 요약}
-  - 참조: `sdk/CLAUDE.md` (헥사고날 하네스)
-  - 참조: `sdk/src/adapter/inbound/cli/CLAUDE.md` (CLI 규칙)
-* 레퍼런스 구현: `sdk/src/domain/workspace/` (가장 정합적인 기준 구현)
+* 아키텍처: {해당 패키지의 아키텍처 규칙 요약}
+  - 참조: `client/README.md` (np-client 헥사곤 + core-free 규칙)
+  - 참조: `sdk/src/CLAUDE.md` (Python 코딩 규칙 — client·engine이 sdk 규율 승계)
+  - 참조: `client/docs/migration-charter.md` (이관 성격 작업일 때)
+  <!-- Engine 티켓이면 engine/README.md, Backend 티켓이면 backend/CLAUDE.md -->
+* 레퍼런스 구현: `client health ready` 수직 슬라이스
+  (`cli(commands/ready) → wiring → HealthReadyService → BackendHealthCheckPort ← BackendHealthClient`)
+  — 새 커맨드는 이 흐름을 그대로 복제
 * 구현 순서: Domain → Application → Adapter
+* 제약: **core-free** — `torch`, `np_quantizer_v2`, `np_hw_common`, `np_core_kit` 등 import 금지
+  <!-- Engine 티켓이면: core 허용. 단 구 sdk-flat bare import(adapter/application/domain/common/config) 금지 -->
 * {추가 기술 맥락 — 외부 모듈 호출 방법, 기존 패턴 등}
+
+### 레거시 대조 (해당 시)
+
+* 이관 전 원본: `sdk/src/{경로}:{라인}` — **읽기 전용 참고** (수정 대상 아님)
+* parity 기준: {원본과 동등해야 하는 동작}. 의도적으로 벗어나면 deviation으로 기록
 
 ### 외부 모듈 연관 (해당 시)
 
 * 모듈: `np_quantizer_v2`
-* SDK 진입점: `sdk/src/domain/optimization/service/quantize_service.py:45`
+* Engine 진입점: `engine/src/np_engine/application/optimization/quantize/{service}.py:45`
 * 호출 패턴: {기존 코드의 호출 방식 설명}
 
 ## ✅ 완료 조건 (Acceptance Criteria)
 
 * [ ] {구체적이고 검증 가능한 조건 1}
 * [ ] {구체적이고 검증 가능한 조건 2}
+* [ ] 아키텍처 테스트 통과 — `pytest client/tests/architecture` (core-free + 레이어 의존)
+      <!-- Engine 티켓이면: pytest engine/tests/architecture (no-legacy-import + 레이어 의존) -->
 * [ ] 기존 테스트 통과 (regression 없음)
 
 ## ➕ 특이사항
 
 * 🔀 Branch: `feat/{티켓키}-{slug}`
-* Module: {SDK | Backend | DB Migration}
+* Module: {Client | Backend | Engine | Common | SDK(legacy) | DB Migration | CI}
 * 참여자: {담당자}
-* ⚠️ {주의사항 — 레거시 코드 존재, DB 마이그레이션 필요 등}
+* ⚠️ {주의사항 — 레거시 코드 존재, DB 마이그레이션 필요, 계약 소비처 등}
+* {Common 티켓이면} 계약 소비처: {client / backend / engine 중 영향받는 쪽}
 ```
 
 #### 사용자에게 테이블로 제시
@@ -452,11 +587,12 @@ Phase 1의 분석 결과를 바탕으로 내부적으로 설계 방향을 정리
 
 | # | 제목 | 영역 | 선행 | 주요 변경 |
 |---|------|------|------|----------|
-| 1 | [SWE] {작업 1} | SDK | - | Domain port 메서드 추가 |
-| 2 | [SWE] {작업 2} | SDK | #1 | Application UseCase 구현 |
-| 3 | [SWE] {작업 3} | SDK | #2 | CLI 커맨드 추가 |
-| 4 | [SWE] {작업 4} | Backend | - | Entity 컬럼 + API 수정 |
-| 5 | [SWE] {작업 5} | DB | #4 | 마이그레이션 스크립트 |
+| 1 | [SWE] {작업 1} | Common | - | messaging 계약 필드 추가 (소비처: backend, engine) |
+| 2 | [SWE] {작업 2} | Backend | #1 | Entity 컬럼 + API 수정 |
+| 3 | [SWE] {작업 3} | DB Migration | #2 | 마이그레이션 스크립트 |
+| 4 | [SWE] {작업 4} | Client | #2 | Domain port + Application UseCase |
+| 5 | [SWE] {작업 5} | Client | #4 | CLI 커맨드 추가 |
+| 6 | [SWE] {작업 6} | Engine | #1 | 이벤트 핸들러에서 필드 소비 |
 
 **설정:**
 - 담당자: {담당자}
@@ -554,9 +690,10 @@ feat/{티켓키}-{요약 slug}
 
 | # | 티켓 | 제목 | 영역 | 브랜치명(기록) | 링크 |
 |---|------|------|------|--------|------|
-| 1 | NPP02-XXXX | [SWE] {제목} | SDK | `feat/NPP02-XXXX-{slug}` | [바로가기](...) |
-| 2 | NPP02-YYYY | [SWE] {제목} | SDK | `feat/NPP02-YYYY-{slug}` | [바로가기](...) |
-| 3 | NPP02-ZZZZ | [SWE] {제목} | Backend | `feat/NPP02-ZZZZ-{slug}` | [바로가기](...) |
+| 1 | NPP02-XXXX | [SWE] {제목} | Common | `feat/NPP02-XXXX-{slug}` | [바로가기](...) |
+| 2 | NPP02-YYYY | [SWE] {제목} | Backend | `feat/NPP02-YYYY-{slug}` | [바로가기](...) |
+| 3 | NPP02-ZZZZ | [SWE] {제목} | Client | `feat/NPP02-ZZZZ-{slug}` | [바로가기](...) |
+| 4 | NPP02-WWWW | [SWE] {제목} | Engine | `feat/NPP02-WWWW-{slug}` | [바로가기](...) |
 
 총 {N}개 티켓 생성 | 브랜치명 기록: ✅ (실제 생성은 `/implement`) | 스토리 연결: ✅
 ```
@@ -585,7 +722,7 @@ API 토큰은 [Atlassian API 토큰 관리](https://id.atlassian.com/manage-prof
 | `/opsx:explore` | 자유 탐색형 대화 | Phase 1-3이 유사하나, 이 스킬은 스토리 기반으로 목적이 명확 |
 | `/opsx:propose` | proposal/design/tasks 아티팩트 생성 | 이 스킬은 파일 아티팩트 대신 Jira 티켓을 직접 생성 |
 | `/implement` | 티켓 → 브랜치 → 구현 → PR | **이 스킬의 후속 단계**. 생성된 티켓을 `/implement`에 넘겨 자동 구현 |
-| `hex-orchestrator` | 헥사고날 구현 파이프라인 | `/implement`의 Agent가 SDK 구현 시 내부적으로 참조 |
+| `hex-orchestrator` | 헥사고날 구현 파이프라인 | `/implement`의 Agent가 client·engine·sdk 구현 시 내부적으로 참조 |
 
 ## 주의사항
 
@@ -595,7 +732,12 @@ API 토큰은 [Atlassian API 토큰 관리](https://id.atlassian.com/manage-prof
 - 요구사항 의사결정 지점은 **분석 도중 즉시** 하나씩 묻는다 (요약에 몰아서 X)
 - Phase 1에서 **반드시 사용자 확인**을 거친 후 Phase 2로 진행
 - 소스에 없는 작업을 추론하여 추가하되, **반드시 사용자에게 확인** 후 포함
-- SDK/Backend 영향을 판단할 때 **코드를 실제로 읽어서** 판단 (추측 금지)
+- Client/Backend/Engine/Common 영향을 판단할 때 **코드를 실제로 읽어서** 판단 (추측 금지).
+  로컬 체크아웃이 없으면 `gh`로 확인 (참조 파일 §9)
+- **패키지 귀속·책임 경계는 결정하지 말고 escalate** (질문 유형 F, charter #5·#6).
+  명백한 예외만 판정 후 근거 기록
+- **레거시 `sdk/`는 기본 읽기 전용** — 스토리가 명시적으로 지목할 때만 수정 대상. 기존 sdk 서술은 지우지 않는다
+- **신구조가 기본** — 예전 습관으로 `sdk/src/`에 티켓을 만들지 않는다
 - 외부 모듈 분석이 필요한 경우 호스트 경로가 없으면 **컨테이너 경로를 사용자에게 확인**
 - 티켓 생성 후 **반드시 editJiraIssue로 description을 적용** (MCP 제약)
 
@@ -604,7 +746,8 @@ API 토큰은 [Atlassian API 토큰 관리](https://id.atlassian.com/manage-prof
 - `mcp__atlassian__getJiraIssue`: 스토리 정보 조회
 - `mcp__atlassian__getConfluencePage`: Confluence 원천 문서 조회
 - `WebFetch`: GitHub spec MD 등 외부 문서 조회 (raw URL)
-- `Read`: 로컬 `.md` 소스 조회 (repo에 클론된 spec 포함)
+- `Read`: 로컬 `.md` 소스 조회 (repo에 클론된 spec 포함) + **구조 참조 파일 로딩 (Phase 0)**
+- `gh` (CLI): 로컬 체크아웃이 없을 때 np-enterprise 코드·문서 확인 (참조 파일 §9)
 - `mcp__atlassian__createJiraIssue`: Task 티켓 생성
 - `mcp__atlassian__editJiraIssue`: 티켓 내용 수정 (description 적용)
 - `mcp__atlassian__lookupJiraAccountId`: 담당자 ID 조회

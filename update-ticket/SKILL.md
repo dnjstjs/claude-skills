@@ -15,6 +15,29 @@ marketplace: false
 
 `/add-task`가 "요청 → 새 Task 하나"라면, 이 스킬은 **"기존 티켓 하나 → 내용 갱신"** 이다.
 
+## 대상 구조 (필수 선행 지식)
+
+np-enterprise는 phase 2에서 `sdk`를 3패키지로 분리했다. **신구조가 기본이다:**
+
+```
+np-client (client/src/np_client/) ──HTTP──▶ backend (backend/src/pynp/)
+   thin CLI, core-free                        API·DB·오케스트레이션
+                                                   │ event
+np-common (common/src/np_common/)                  ▼
+   이벤트·DTO 계약 공유              np-engine (engine/src/np_engine/)
+                                       compute, core 허용, 이벤트 소비
+
+[legacy] sdk/src/ — 이관 원본. 읽기 전용
+```
+
+> **Step 1 전에 읽는다:**
+> `~/.claude/skills/story-to-spec/references/np-enterprise-structure.md`
+> (폴백: `~/claude-skills/story-to-spec/references/np-enterprise-structure.md`)
+
+⚠️ **이 스킬이 다루는 티켓은 대부분 구조 변경 전에 만들어졌다.** `Module: SDK`나 `sdk/src/...`
+경로를 참조하고 있을 가능성이 높다. Step 4에서 **구조 드리프트를 반드시 대조**하고,
+Step 6에서 **기존 서술을 지우지 않고 신구조를 덧붙인다.**
+
 ## 파이프라인 위치
 
 ```
@@ -45,10 +68,11 @@ marketplace: false
 ## 전체 흐름
 
 ```
+0. 구조 참조 로딩  — references/np-enterprise-structure.md 읽기
 1. 티켓 읽기      — getJiraIssue로 현재 description 통째로 확보 (구조 파악)
 2. 의도 파악      — 무엇을 추가/수정? 어느 섹션에? (필요하면 AskUserQuestion으로 방향 좁히기)
 3. 내용 수집      — 사용자 구두 + 문서 로딩(WebFetch/getConfluencePage/Read)
-4. ground-truth 검증 — 불러준 내용을 gh로 PR·문서·코드 대조 (⚠️ 핵심 단계)
+4. ground-truth 검증 — 불러준 내용을 gh로 PR·문서·코드 대조 + 구조 드리프트 대조 (⚠️ 핵심 단계)
 5. 충돌·공백 표면화  — 검증 결과가 어긋나거나 빠진 케이스가 있으면 사용자에게 알림
 6. description 재구성 — 기존 구조 유지하며 전체 description 재작성 (기존 내용 보존)
 7. 적용           — editJiraIssue(contentFormat markdown, description 전체 교체)
@@ -109,6 +133,31 @@ gh api repos/<org>/<repo>/contents/<path> --jq '.content' | base64 -d | grep -ni
 
 > 티켓에 넣는 각 결정은 `근거(출처)` 컬럼에 **검증한 출처**(PR #번호, 문서 §절, 사용자)를 적는다.
 
+### 4-b. 구조 드리프트 대조 (phase 2 전에 만들어진 티켓)
+
+티켓이 **레거시 경로·Module을 참조하고 있는지** 확인한다. 이건 사용자가 요청하지 않아도 한다.
+
+```bash
+# 티켓이 참조하는 sdk 경로가 신구조로 이관됐는지 확인
+gh api repos/nota-github/np-enterprise/contents/client/src/np_client/<대응경로>?ref=dev --jq '.[].name'
+gh api repos/nota-github/np-enterprise/contents/engine/src/np_engine/<대응경로>?ref=dev --jq '.[].name'
+
+# 레거시 원본이 아직 살아있는지 (strangler — 보통 살아있다)
+gh api repos/nota-github/np-enterprise/contents/sdk/src/<경로>?ref=dev --jq '.name'
+```
+
+체크 항목:
+
+| 확인 | 판단 |
+|------|------|
+| `Module:` 값이 `SDK`인데 실제 작업은 CLI·compute? | 신구조 값(`Client`/`Engine`) 후보 — Step 5에서 확인 |
+| 변경 대상이 `sdk/src/...`인데 신구조에 대응 경로가 존재? | **이관 완료** — 신구조 경로를 덧붙이고 기존 행은 `(legacy 원본)`으로 |
+| 신구조에 대응 경로가 없음? | **아직 미이관** — `sdk/` 경로 유지가 맞다. 바꾸지 않는다 |
+| Client 작업인데 core 의존(torch 등)이 필요? | 귀속 오류 가능 — Step 5에서 escalate (charter #5·#6) |
+
+> ⚠️ **경로가 신구조에 없다는 이유로 티켓을 "고쳤다"고 하지 말 것.** 미이관이면 레거시가 정답이다.
+> 라우팅 표는 참조 파일 §3, 귀속 판정은 §4.
+
 ## Step 5: 충돌·공백 표면화
 
 검증 결과가 사용자 입력과 **어긋나거나**, 사용자가 놓친 **케이스가 있으면**
@@ -118,6 +167,11 @@ gh api repos/<org>/<repo>/contents/<path> --jq '.content' | base64 -d | grep -ni
 - 용어 충돌: 사용자 "QDQ는 하위 Q 기준 전달" ↔ 문서 "QDQ는 비교 대상 아님" → 층위가 다름을 설명하고 문구 조율
 - 범위 공백: 티켓이 GQ만 전제 ↔ 실제 target은 GO도 가능 → 누락 위험 지적 후 양쪽 명시
 - 링크/버전 불일치: 사용자가 준 경로·버전이 문서와 다름 → 확인 요청
+- **구조 드리프트**: 티켓이 `sdk/src/...` / `Module: SDK`를 참조하는데 해당 기능이 신구조로 이관됨
+  → "이 티켓은 구구조 기준입니다. 신구조 경로(`client/src/np_client/...`)를 덧붙이고
+  `Module`을 `Client`로 갱신할까요? (기존 sdk 서술은 legacy 표기로 남깁니다)"
+- **패키지 귀속 오류**: Client 전제인데 core 연산이 필요 → engine 소속 가능. **결정하지 말고 escalate**
+  (charter #5·#6 — 경계 결정은 위임 금지)
 
 애매하면 `AskUserQuestion`으로 "원문 유지 vs 조율안" 중 택하게 한다.
 
@@ -127,6 +181,23 @@ gh api repos/<org>/<repo>/contents/<path> --jq '.content' | base64 -d | grep -ni
 - 표 형식 섹션(Requirements 등)은 **행 추가**로, 서술 섹션은 문단/불릿 추가로.
 - 요구사항을 추가하면 대응하는 **AC 항목**도 같이 추가한다 (요구사항↔검증 짝 유지).
 - 각 결정에 **출처**를 붙인다.
+
+### 구조 갱신 규칙 (덧붙인다, 지우지 않는다)
+
+Step 4-b에서 드리프트가 확인되고 Step 5에서 사용자가 동의했을 때만 적용한다.
+
+1. **`Module:` 갱신** — 새 허용값으로 (`Client | Backend | Engine | Common | SDK(legacy) | DB Migration | CI`).
+   기존 `SDK`는 `SDK(legacy)`와 동일 취급이므로, 실제 작업이 sdk면 그대로 둬도 된다.
+2. **변경 대상 표** — 신구조 경로 행을 추가하고, **기존 `sdk/` 행은 삭제하지 않는다.**
+   ```
+   | `client/src/np_client/.../xxx.py` | {수정 내용} |
+   | `sdk/src/.../xxx.py` | (legacy 원본 — 읽기 전용 대조) |
+   ```
+3. **구현 가이드 참조 문서** — 신구조 문서를 추가 (`client/README.md` / `engine/README.md`),
+   기존 `sdk/CLAUDE.md` 참조는 남긴다 (코딩 규칙은 client·engine이 승계).
+4. **AC 추가** — Client면 `pytest client/tests/architecture` (core-free),
+   Engine이면 `pytest engine/tests/architecture` (no-legacy-import).
+5. **미이관이면 아무것도 바꾸지 않는다** — 신구조에 대응 경로가 없으면 `sdk/`가 정답이다.
 
 ## Step 7: 적용
 
@@ -153,8 +224,10 @@ mcp__atlassian__editJiraIssue
 - 구현 가이드: {추가 항목}
 - AC: {추가 체크}
 - 특이사항: {참조 보강}
+- 구조: {Module SDK → Client 갱신 / 신구조 경로 추가, sdk 행은 legacy 표기로 보존}
+        {또는: 미이관 확인 — sdk 경로 유지}
 
-검증: PR #166 ✅ / 문서 §5.3 ✅ / 버전 핀 ❓(문서엔 없음, 사용자 신뢰)
+검증: PR #166 ✅ / 문서 §5.3 ✅ / 구조 드리프트 ✅(client로 이관 확인) / 버전 핀 ❓(문서엔 없음, 사용자 신뢰)
 🔗 {티켓 URL}
 ```
 
@@ -169,6 +242,8 @@ mcp__atlassian__editJiraIssue
 | **어긋나면 표면화** | 사용자 입력을 조용히 합치지 말고, 충돌·공백을 먼저 알린다 |
 | **출처를 남긴다** | 각 결정에 PR/문서/사용자 근거 표기 → 나중에 추적 가능 |
 | **요구사항↔AC 짝** | 요구사항을 넣으면 검증 항목도 같이 넣는다 |
+| **구조는 덧붙인다, 지우지 않는다** | phase 2 이전 티켓은 `sdk/` 기준. 신구조를 추가하되 legacy 서술은 `(legacy 원본)`으로 보존 |
+| **미이관이면 손대지 않는다** | 신구조에 대응 경로가 없으면 `sdk/`가 정답. "최신화"로 오히려 틀리게 만들지 말 것 |
 
 ## 주의사항
 
@@ -177,6 +252,9 @@ mcp__atlassian__editJiraIssue
 - 코드 검증이 필요한데 로컬 체크아웃이 없어도 **포기하지 말 것** — `gh`로 확인.
 - 검증으로 확정 못 한 항목(예: 런타임 버전 핀)은 결과 보고에서 **❓로 구분** 표기.
 - 링크(issuelinks) 방향은 story-to-spec 규칙과 동일 — 새 링크를 걸 땐 `outwardIssue`가 항상 Task.
+- **구조 드리프트 대조(Step 4-b)는 사용자가 요청하지 않아도 수행**한다. 단, 갱신은 Step 5 동의 후에만.
+- 패키지 귀속이 어긋나 보이면 **고치지 말고 escalate** (charter #5·#6).
+- `Module: SDK`와 `SDK(legacy)`는 **동일 취급** — 기존 티켓 표기를 강제로 바꾸지 않는다.
 
 ## 관련 도구
 

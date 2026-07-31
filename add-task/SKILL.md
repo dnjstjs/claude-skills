@@ -15,6 +15,27 @@ marketplace: false
 `/story-to-spec`이 "스토리 → 여러 Task 일괄"이라면, 이 스킬은 **"요청 하나 → Task 하나(또는 소수)"** 다.
 티켓 템플릿·링크 규칙·생성 절차·`/implement` 연계는 story-to-spec과 **동일한 컨벤션**을 재사용한다.
 
+## 대상 구조 (필수 선행 지식)
+
+np-enterprise는 phase 2에서 `sdk`를 3패키지로 분리했다. **신구조가 기본이다:**
+
+```
+np-client (client/src/np_client/) ──HTTP──▶ backend (backend/src/pynp/)
+   thin CLI, core-free                        API·DB·오케스트레이션
+                                                   │ event
+np-common (common/src/np_common/)                  ▼
+   이벤트·DTO 계약 공유              np-engine (engine/src/np_engine/)
+                                       compute, core 허용, 이벤트 소비
+
+[legacy] sdk/src/ — 이관 원본. 읽기 전용 (명시적 sdk 요청일 때만 수정)
+```
+
+> **티켓 초안을 만들기 전에 읽는다:**
+> `~/.claude/skills/story-to-spec/references/np-enterprise-structure.md`
+> (폴백: `~/claude-skills/story-to-spec/references/np-enterprise-structure.md`)
+>
+> 키워드→경로 라우팅(§3), 패키지 귀속 판정 트리(§4), `Module:` 허용값(§7)이 여기 있다.
+
 ## 파이프라인 위치
 
 ```
@@ -91,14 +112,18 @@ marketplace: false
 - **무엇을** 해야 하는가 (한 문장)
 - **왜** 필요한가 (버그 재현 조건 / 검증 목적 등)
 - **티켓 성격**: `fix`(버그 수정) / `test`(검증·테스트) / `task`(일반 추가 작업)
+- **패키지 귀속**: Client / Backend / Engine / Common / SDK(legacy) / DB Migration / CI
+  → 참조 파일 §4 판정 트리로 결정. **애매하면 Step 4에서 묻는다** (charter #5·#6)
 
 ### `--deep` 일 때만: 국소 코드 스캔
 
 대상이 명확할 때 관련 파일만 좁게 읽어 티켓을 보강한다. (story-to-spec의 전면 분석과 달리 **국소**)
 
-1. 설명의 키워드로 관련 파일 grep/glob
-2. 변경 지점(파일:라인) 파악
-3. 변경 대상 표 + 구체적 완료조건 작성
+1. 참조 파일 §3 라우팅 표로 **어느 패키지·경로를 볼지** 결정 (신구조 기본)
+2. 설명의 키워드로 관련 파일 grep/glob (로컬 체크아웃 없으면 `gh` — 참조 파일 §9)
+3. 변경 지점(파일:라인) 파악
+4. 변경 대상 표 + 구체적 완료조건 작성
+5. Client 대상이면 **core-free 위반 여부 확인** (torch·`np_*` 필요 → engine 소속)
 
 > 코드 구현 방식(A/B·레이어·레거시 처리)은 **묻지 않고 Agent 재량**. np enterprise repo 훅이 품질을 보장한다. (story-to-spec과 동일 철학)
 
@@ -110,7 +135,16 @@ marketplace: false
 - "이 버그, 재현 조건이 {A}인가요 {B}인가요?"
 - "검증 범위가 {단위 테스트}인가요 {E2E}인가요?"
 
-> **코드 구현 세부는 묻지 않는다.** 요구사항이 애매할 때만 최소한으로.
+**패키지 귀속이 애매할 때도 묻는다** (요구사항 층위 예외 — repo `client/docs/migration-charter.md`
+원칙 #5·#6이 "경계 결정은 위임 금지 → escalate"로 명시):
+
+- "이 작업, client에서 끝나나요 engine 호출로 가나요? (core 연산이 걸리면 engine)"
+- "이 기능은 아직 `sdk/`에만 있습니다. client로 이관할까요, sdk에서 고칠까요?"
+
+> **묻지 않는 경우** (참조 파일 §4 예외): core 의존이 명백(→engine), 순수 CLI 옵션·문구(→client),
+> 순수 엔드포인트·스키마(→backend). 이때는 판정 후 근거만 티켓에 기록한다.
+>
+> **코드 구현 세부는 묻지 않는다.** 요구사항·패키지 귀속이 애매할 때만 최소한으로.
 
 ## Step 5: 초안 제시 → 확인
 
@@ -129,23 +163,29 @@ marketplace: false
 
 * {무엇을 해야 하는지}
 
-<!-- --deep 일 때만 아래 표 -->
+<!-- --deep 일 때만 아래 표. 경로는 해당 패키지 기준 (신구조) -->
 ### 변경 대상
 | 파일 | 변경 내용 |
 |------|----------|
-| `sdk/src/.../xxx.py:45` | {수정 내용} |
+| `client/src/np_client/.../xxx.py:45` | {수정 내용} |
+
+<!-- Engine: engine/src/np_engine/... | Backend: backend/src/pynp/...
+     Common: common/src/np_common/... | 레거시 대조: sdk/src/... (읽기 전용) -->
 
 ## ✅ 완료 조건 (Acceptance Criteria)
 
 * [ ] {검증 가능한 조건}
+* [ ] {Client 티켓} 아키텍처 테스트 통과 — `pytest client/tests/architecture` (core-free)
+      <!-- Engine 티켓이면: pytest engine/tests/architecture (no-legacy-import) -->
 * [ ] 기존 테스트 통과 (regression 없음)
 
 ## ➕ 특이사항
 
 * 🔀 Branch: `feat/{티켓키}-{slug}`   ← 생성 후 채움
-* Module: {SDK | Backend | DB Migration | CI}
+* Module: {Client | Backend | Engine | Common | SDK(legacy) | DB Migration | CI}
 * 성격: {fix | test | task}
 * 담당자: {상속 or 지정}
+* {Common 티켓이면} 계약 소비처: {client / backend / engine 중 영향받는 쪽}
 ```
 
 ### 제목 규칙
@@ -231,7 +271,9 @@ standalone(스토리 없음)이면 이 단계를 건너뛴다.
 
 - **링크 규칙은 story-to-spec과 100% 동일** — outwardIssue=Task, inwardIssue=Story, "Blocks". 바꾸지 말 것.
 - 기본은 가볍게(설명→티켓). **`--deep`일 때만 코드를 읽는다.**
-- **요구사항이 애매할 때만** 질문. 코드 구현 세부는 묻지 않는다 (Agent 재량 + 훅).
+- **요구사항·패키지 귀속이 애매할 때만** 질문. 코드 구현 세부는 묻지 않는다 (Agent 재량 + 훅).
+- **신구조가 기본** (`client`/`backend`/`engine`/`common`). 레거시 `sdk/`는 명시적 요청일 때만.
+- 한 티켓은 **하나의 Module**. 두 패키지에 걸치면 나눠서 확인 후 일괄 생성.
 - 요청에 여러 작업이 섞이면 나눠서 확인 후 일괄 생성.
 - 티켓 생성 후 **반드시 editJiraIssue로 description 적용** (MCP 제약).
 - standalone 티켓은 부모/스프린트가 없을 수 있으므로 사용자에게 확인.
@@ -241,7 +283,8 @@ standalone(스토리 없음)이면 이 단계를 건너뛴다.
 - `mcp__atlassian__getJiraIssue`: 부모 스토리 조회(상속값)
 - `mcp__atlassian__getConfluencePage`: Confluence 문서 소스
 - `WebFetch`: GitHub MD 등 외부 문서 소스
-- `Read` / `Grep` / `Glob`: 로컬 문서 + `--deep` 국소 코드 스캔
+- `Read` / `Grep` / `Glob`: 로컬 문서 + `--deep` 국소 코드 스캔 + 구조 참조 파일 로딩
+- `gh` (CLI): 로컬 체크아웃이 없을 때 코드 확인 (참조 파일 §9)
 - `mcp__atlassian__createJiraIssue`: Task 생성
 - `mcp__atlassian__editJiraIssue`: description/sprint 적용
 - `mcp__atlassian__lookupJiraAccountId`: 담당자 ID 조회

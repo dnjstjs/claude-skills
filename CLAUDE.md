@@ -13,6 +13,7 @@ ls -la ~/.claude/skills/story-to-spec
 ls -la ~/.claude/skills/add-task
 ls -la ~/.claude/skills/update-ticket
 ls -la ~/.claude/skills/implement
+ls -la ~/.claude/skills/scrum
 ```
 
 symlink이 없거나 깨져 있으면:
@@ -92,6 +93,45 @@ git config user.email
   ▼
 /review NPP02-YYYY
      코드 리뷰 → 머지 판단
+```
+
+파이프라인 밖 (읽기 전용):
+
+```
+/scrum [NPP02]
+   내 티켓 상태 스냅샷 → 데일리 스크럼 공유 문안 4섹션
+   검토 중(10094)=처리한 내용 / 진행 중(3)=오늘 할일 / Blocked(10032)=BLOCKER
+   + 티켓 코멘트에서 협조·논의 항목 추론 → 슬랙 복붙용 불릿 출력
+   ⚠️ Jira에 쓰지 않는다. 상태 관리는 사용자 몫.
+```
+
+## 공유 구조 참조 (중요)
+
+4개 스킬이 공유하는 np-enterprise 구조 지식은 **한 곳에만** 있습니다:
+
+```
+story-to-spec/references/np-enterprise-structure.md
+```
+
+담긴 내용: 패키지 지도(client/backend/engine/common + 레거시 sdk), 데이터 흐름,
+키워드→경로 라우팅, 패키지 귀속 판정 트리, 패키지별 규율(core-free 등),
+티켓 분할 규칙, `Module:` 필드 허용값, `gh` 확인 명령.
+
+**np-enterprise 구조가 또 바뀌면 이 파일만 수정하세요.** 각 SKILL.md에는 4줄 요약과
+참조 링크만 있습니다. (예외: `Module:` 허용값 문자열은 4개 SKILL.md에도 박혀 있으니
+바뀌면 함께 갱신 — `grep -rn "Client | Backend | Engine"`)
+
+현재 구조 요약:
+
+```
+np-client (client/src/np_client/) ──HTTP──▶ backend (backend/src/pynp/)
+   thin CLI, core-free                        API·DB·오케스트레이션
+                                                   │ event
+np-common (common/src/np_common/)                  ▼
+   이벤트·DTO 계약 공유              np-engine (engine/src/np_engine/)
+                                       compute, core 허용, 이벤트 소비
+
+[legacy] sdk/src/ — 이관 원본. strangler 방식으로 아직 살아있음 (읽기 전용)
 ```
 
 ## 스킬 수정 시
