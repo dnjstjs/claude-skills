@@ -6,9 +6,6 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# 공통 라이브러리가 없으면 조용히 끝낸다 — 훅이 nonzero 로 죽으면 안 된다.
-[ -f "$HERE/lib/common.sh" ] || exit 0
-. "$HERE/lib/common.sh"
 
 STORE="${CC_MEMORY_STORE:-$HOME/claude-memory/np-enterprise}"
 INDEX="$STORE/MEMORY.md"
@@ -28,13 +25,25 @@ emit() {  # <additionalContext>
 REPO=$(cat "$STORE/.repo" 2>/dev/null || printf '%s' "$DEFAULT_REPO")
 [ -d "$REPO/.git" ] || exit 0
 
-TOTAL=$(grep -c '^- ' "$INDEX" || true)
+# 실제 항목 인식 패턴과 동일한 것을 세야 한다 — 느슨한 '^- ' 는 항목이 아닌
+# 불릿 텍스트까지 세어 상한을 잘못 건드릴 수 있다. 이전 실행이 남긴 ⚠ 표시도
+# 허용해 재실행 시 상한 판정이 흔들리지 않게 한다.
+ENTRY_RE='^- (⚠ 삭제됨 |⚠ )?\[[^]]*\]\([^)]+\.md\)'
+TOTAL=$(grep -cE "$ENTRY_RE" "$INDEX" || true)
 if [ "${TOTAL:-0}" -gt "$MAX_ENTRIES" ]; then
   emit "메모리 ${TOTAL}건 — 상한 ${MAX_ENTRIES}건 초과로 stale 검사를 건너뛰었습니다. 정리 필요."
   exit 0
 fi
 
+# symbol_diff.py 가 없으면 심볼 단위 검사를 아예 시도하지 않는다 — 실패한
+# 호출의 nonzero 종료를 MISSING 으로 오독해 전체 항목을 거짓으로 삭제됨
+# 처리하는 것을, 진짜 삭제와 구분되지 않는 상태로 방치하지 않기 위해서다.
+SYMBOL_DIFF="$HERE/symbol_diff.py"
+SYMBOL_DIFF_AVAILABLE=1
+[ -f "$SYMBOL_DIFF" ] || SYMBOL_DIFF_AVAILABLE=0
+
 TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
 STALE=""
 COUNT=0
 
@@ -61,14 +70,14 @@ while IFS= read -r line; do
   case "$rest" in *#*) symbol=${rest#*#} ;; esac
 
   mark=""
-  if [ -n "$symbol" ] && [ "${path##*.}" = "py" ]; then
-    python3 "$HERE/symbol_diff.py" "$REPO" "$path" "$symbol" "$commit" >/dev/null 2>&1
+  if [ "$SYMBOL_DIFF_AVAILABLE" -eq 1 ] && [ -n "$symbol" ] && [ "${path##*.}" = "py" ]; then
+    python3 "$SYMBOL_DIFF" "$REPO" "$path" "$symbol" "$commit" >/dev/null 2>&1
     case $? in
       1) mark="⚠ " ;;
       2) mark="⚠ 삭제됨 " ;;
       *) mark="" ;;
     esac
-  else                                          # 파일 단위 폴백
+  else                                          # 파일 단위 폴백 (symbol_diff 부재 포함)
     if ! git -C "$REPO" cat-file -e "HEAD:$path" 2>/dev/null; then
       mark="⚠ 삭제됨 "
     elif [ -n "$(git -C "$REPO" log --format=%h "$commit..HEAD" -- "$path" 2>/dev/null)" ]; then
@@ -87,5 +96,10 @@ done < "$INDEX"
 
 mv "$TMP" "$INDEX" 2>/dev/null || rm -f "$TMP"
 
-[ "$COUNT" -gt 0 ] && emit "⚠ 재확인 필요 ${COUNT}건: ${STALE}"
+MSG=""
+[ "$COUNT" -gt 0 ] && MSG="⚠ 재확인 필요 ${COUNT}건: ${STALE}"
+if [ "$SYMBOL_DIFF_AVAILABLE" -eq 0 ]; then
+  MSG="${MSG}${MSG:+ / }symbol_diff.py 없음 — 심볼 단위 검사를 건너뛰고 파일 단위로만 확인했습니다"
+fi
+[ -n "$MSG" ] && emit "$MSG"
 exit 0

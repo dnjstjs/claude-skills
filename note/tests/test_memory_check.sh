@@ -16,6 +16,10 @@ def stable():
 def volatile():
     return 1
 PY
+cat > "$REPO/deleted.py" <<'PY'
+def doomed():
+    return 1
+PY
 echo "text" > "$REPO/doc.txt"
 git -C "$REPO" add -A >/dev/null
 git -C "$REPO" commit -qm base
@@ -28,6 +32,7 @@ def stable():
 def volatile():
     return 999
 PY
+rm "$REPO/deleted.py"
 echo "text changed" > "$REPO/doc.txt"
 git -C "$REPO" add -A >/dev/null
 git -C "$REPO" commit -qm change
@@ -54,12 +59,14 @@ mk unchanged-one "mod.py#stable@$BASE"
 mk changed-one   "mod.py#volatile@$BASE"
 mk file-level    "doc.txt@$BASE"
 mk no-commit     "mod.py#stable"
+mk deleted-one   "deleted.py#doomed@$BASE"
 
 cat > "$STORE/MEMORY.md" <<'EOF'
 - [안 바뀜](unchanged-one.md) — 그대로
 - ⚠ [바뀜](changed-one.md) — 변경됨
 - [파일단위](file-level.md) — py 아님
 - [커밋없음](no-commit.md) — 기준 없음
+- [삭제됨](deleted-one.md) — 파일이 사라짐
 EOF
 
 echo "test_memory_check"
@@ -72,14 +79,16 @@ assert_contains "$IDX" "- [안 바뀜](unchanged-one.md)" "변경 없음: ⚠ �
 assert_contains "$IDX" "- ⚠ [바뀜](changed-one.md)" "변경됨: ⚠ 붙음"
 assert_contains "$IDX" "- ⚠ [파일단위](file-level.md)" "py 아님: 파일 단위 폴백으로 ⚠"
 assert_contains "$IDX" "- [커밋없음](no-commit.md)" "커밋 없음: 건너뜀"
+assert_contains "$IDX" "- ⚠ 삭제됨 [삭제됨](deleted-one.md)" "심볼 근거 파일 삭제됨: ⚠ 삭제됨 붙음 (MISSING 판정 실사용)"
 
 assert_contains "$OUT" "additionalContext" "SessionStart JSON 출력"
-assert_contains "$OUT" "재확인 필요 2건" "요약: 2건"
+assert_contains "$OUT" "재확인 필요 3건" "요약: 3건"
 
-# 두 번 돌려도 ⚠ 가 중복되지 않는다
+# 두 번 돌려도 파일 전체가 바이트 단위로 동일하다 (⚠ 및 ⚠ 삭제됨 모두 재계산 전 벗겨져야 함)
+IDX_RUN1=$(cat "$STORE/MEMORY.md")
 bash "$HERE/../scripts/memory-check.sh" <<< '{"session_id":"m1","cwd":"/tmp"}' >/dev/null
-CNT=$(grep -c '⚠ ⚠' "$STORE/MEMORY.md" || true)
-assert_eq "0" "$CNT" "재실행: ⚠ 중복 없음"
+IDX_RUN2=$(cat "$STORE/MEMORY.md")
+assert_eq "$IDX_RUN1" "$IDX_RUN2" "재실행: MEMORY.md 전체 내용 동일 (idempotent, ⚠/⚠ 삭제됨 모두 벗겨짐)"
 
 # 저장소가 없어도 죽지 않는다
 CC_MEMORY_STORE=/no/such/store bash "$HERE/../scripts/memory-check.sh" <<< '{}' >/dev/null && rc=0 || rc=$?
