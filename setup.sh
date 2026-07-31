@@ -148,14 +148,17 @@ link_memory_dirs() {
             # 먼저 들어온 것만 남긴다.
             local file_target
             file_target=$(printf '%s' "$idxline" | sed -nE 's/.*\(([^)]+\.md)\).*/\1/p')
+            # 뒤의 `|| true`: set -e 아래에서 이 append 가 실패(저장소 쓰기 불가
+            # 등)해도 스크립트 전체가 죽지 않게 한다 — 실패 여부는 아래
+            # index_lost 검증 루프가 실제 저장소 내용을 다시 읽어 판단한다.
             if [ -n "$file_target" ]; then
               case "$(cat "$MEMORY_STORE/MEMORY.md" 2>/dev/null)" in
                 *"($file_target)"*) ;;  # 이미 있음 — 첫 등장을 유지, 건너뜀
-                *) printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md" ;;
+                *) printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md" 2>/dev/null || true ;;
               esac
             else
               grep -qxF -- "$idxline" "$MEMORY_STORE/MEMORY.md" 2>/dev/null || \
-                printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md"
+                printf '%s\n' "$idxline" >> "$MEMORY_STORE/MEMORY.md" 2>/dev/null || true
             fi
           done < "$target/MEMORY.md"
         else
