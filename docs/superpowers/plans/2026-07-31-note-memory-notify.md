@@ -51,6 +51,7 @@
 
 **Files:**
 - Create: `note/tests/assert.sh`
+- Create: `note/tests/curl_stub.sh`
 - Create: `note/tests/run.sh`
 - Create: `note/tests/fixtures/transcript_ok.jsonl`
 - Create: `note/tests/fixtures/transcript_broken.jsonl`
@@ -69,6 +70,8 @@
   - `slack_send <text>` → 전송. 웹훅 파일 없으면 조용히 성공
   - 변수 `CC_NOTIFY_STATE_DIR` (기본 `/tmp/claude-notify`), `CC_SLACK_WEBHOOK_FILE` (기본 `~/.claude/.slack-webhook`)
   - 테스트는 `note/tests/assert.sh`의 `assert_eq`, `assert_contains`, `finish`를 쓴다.
+  - Slack 전송을 검사하는 테스트는 `note/tests/curl_stub.sh`를 source 한 뒤
+    `install_curl_stub <dir>` 를 호출하고 `curl_stub_body` 로 마지막 전송 내용을 읽는다.
 
 - [ ] **Step 1: 어서션 헬퍼 작성**
 
@@ -117,7 +120,53 @@ finish() {
 }
 ```
 
-- [ ] **Step 2: 픽스처 작성**
+- [ ] **Step 2: curl 스텁 헬퍼 작성**
+
+Slack 전송을 검사하는 테스트가 공유한다. 실제 알림이 나가지 않게 `curl` 을 PATH 앞단에서 가로챈다.
+
+`note/tests/curl_stub.sh`:
+
+```bash
+#!/usr/bin/env bash
+# curl 을 가짜로 바꿔 Slack 전송 내용을 파일로 캡처한다.
+# 테스트가 실제 Slack 알림을 쏘지 않게 하려는 것이다.
+#
+# 사용법:
+#   . curl_stub.sh
+#   install_curl_stub "$WORKDIR"
+#   ... 스크립트 실행 ...
+#   BODY=$(curl_stub_body)     # 마지막 전송 인자 전체 (없으면 빈 문자열)
+#   curl_stub_reset            # 다음 케이스 전에 호출
+
+install_curl_stub() {  # <workdir>
+  CURL_STUB_DIR="$1"
+  mkdir -p "$CURL_STUB_DIR/bin"
+  cat > "$CURL_STUB_DIR/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do printf '%s\n' "$a"; done > "$CURL_STUB_CAPTURE/curl.args"
+exit 0
+STUB
+  chmod +x "$CURL_STUB_DIR/bin/curl"
+  export CURL_STUB_CAPTURE="$CURL_STUB_DIR"
+  export PATH="$CURL_STUB_DIR/bin:$PATH"
+  printf 'fake-webhook-url\n' > "$CURL_STUB_DIR/webhook"
+  export CC_SLACK_WEBHOOK_FILE="$CURL_STUB_DIR/webhook"
+}
+
+curl_stub_reset() {
+  rm -f "$CURL_STUB_CAPTURE/curl.args"
+}
+
+curl_stub_body() {
+  cat "$CURL_STUB_CAPTURE/curl.args" 2>/dev/null
+}
+
+curl_stub_sent() {  # 전송되었으면 true, 아니면 false 를 출력
+  [ -f "$CURL_STUB_CAPTURE/curl.args" ] && echo true || echo false
+}
+```
+
+- [ ] **Step 3: 픽스처 작성**
 
 `note/tests/fixtures/transcript_ok.jsonl`:
 
@@ -138,7 +187,7 @@ finish() {
 {"type":"last-prompt","lastPrompt":"마지막 프롬프트","sessionId":"s2"}
 ```
 
-- [ ] **Step 3: 실패하는 테스트 작성**
+- [ ] **Step 4: 실패하는 테스트 작성**
 
 `note/tests/test_common.sh`:
 
@@ -180,7 +229,7 @@ assert_eq "0" "$rc" "slack_send: 웹훅 없으면 성공 종료"
 finish
 ```
 
-- [ ] **Step 4: 테스트를 돌려 실패를 확인**
+- [ ] **Step 5: 테스트를 돌려 실패를 확인**
 
 ```bash
 cd /ssd1/home/wonseon.song/claude-skills
@@ -189,7 +238,7 @@ bash note/tests/test_common.sh
 
 기대: `note/scripts/lib/common.sh: No such file or directory` 로 실패.
 
-- [ ] **Step 5: clean_text.py 작성**
+- [ ] **Step 6: clean_text.py 작성**
 
 `note/scripts/lib/clean_text.py`:
 
@@ -219,7 +268,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 6: common.sh 작성**
+- [ ] **Step 7: common.sh 작성**
 
 `note/scripts/lib/common.sh`:
 
@@ -288,7 +337,7 @@ human_duration() {  # <seconds>
 }
 ```
 
-- [ ] **Step 7: 테스트를 돌려 통과 확인**
+- [ ] **Step 8: 테스트를 돌려 통과 확인**
 
 ```bash
 cd /ssd1/home/wonseon.song/claude-skills
@@ -297,7 +346,7 @@ bash note/tests/test_common.sh
 
 기대: 모든 줄이 `ok`, 마지막 줄 `PASS`.
 
-- [ ] **Step 8: 전체 실행기 작성**
+- [ ] **Step 9: 전체 실행기 작성**
 
 `note/tests/run.sh`:
 
@@ -315,7 +364,7 @@ done
 exit "$rc"
 ```
 
-- [ ] **Step 9: 전체 테스트 실행**
+- [ ] **Step 10: 전체 테스트 실행**
 
 ```bash
 cd /ssd1/home/wonseon.song/claude-skills
@@ -324,7 +373,7 @@ bash note/tests/run.sh
 
 기대: 마지막 줄 `ALL PASS`.
 
-- [ ] **Step 10: 커밋**
+- [ ] **Step 11: 커밋**
 
 ```bash
 cd /ssd1/home/wonseon.song/claude-skills
@@ -477,29 +526,18 @@ git commit -m "feat(note): UserPromptSubmit 훅으로 턴/세션 시작 시각 �
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/assert.sh"
 
+. "$HERE/curl_stub.sh"
+
 export CC_NOTIFY_STATE_DIR="$(mktemp -d)"
 OUTDIR="$(mktemp -d)"
 trap 'rm -rf "$CC_NOTIFY_STATE_DIR" "$OUTDIR"' EXIT
-
-# curl 을 가짜로 바꿔 전송 내용을 파일로 캡처한다
-mkdir -p "$OUTDIR/bin"
-cat > "$OUTDIR/bin/curl" <<'STUB'
-#!/usr/bin/env bash
-for a in "$@"; do printf '%s\n' "$a"; done > "$OUTDIR_CAPTURE/curl.args"
-exit 0
-STUB
-chmod +x "$OUTDIR/bin/curl"
-export OUTDIR_CAPTURE="$OUTDIR"
-export PATH="$OUTDIR/bin:$PATH"
-
-echo "fake-webhook-url" > "$OUTDIR/webhook"
-export CC_SLACK_WEBHOOK_FILE="$OUTDIR/webhook"
+install_curl_stub "$OUTDIR"
 
 OK="$HERE/fixtures/transcript_ok.jsonl"
 NOW=$(date +%s)
 
 run_stop() {  # <turn_start_epoch> <last_assistant_message>
-  rm -f "$OUTDIR/curl.args"
+  curl_stub_reset
   mkdir -p "$CC_NOTIFY_STATE_DIR"
   printf '%s\n' "$1" > "$CC_NOTIFY_STATE_DIR/s1.turn"
   jq -nc --arg t "$OK" --arg m "$2" \
@@ -511,11 +549,11 @@ echo "test_notify_stop"
 
 # 1. 경과 3분 미만 -> 전송 안 함
 run_stop "$((NOW - 30))" "짧은 작업 끝"
-assert_eq "false" "$([ -f "$OUTDIR/curl.args" ] && echo true || echo false)" "3분 미만: 전송 안 함"
+assert_eq "false" "$(curl_stub_sent)" "3분 미만: 전송 안 함"
 
 # 2. 경과 3분 초과 -> 전송, 요청·결과 모두 채워짐
 run_stop "$((NOW - 720))" "AMP 예외 3곳 추가, 테스트 통과."
-BODY=$(cat "$OUTDIR/curl.args" 2>/dev/null)
+BODY=$(curl_stub_body)
 assert_contains "$BODY" "작업 완료 (12분)" "3분 초과: 경과 표시"
 assert_contains "$BODY" "커밋 푸시 부탁" "3분 초과: 요청 채워짐"
 assert_contains "$BODY" "AMP 예외 3곳 추가" "3분 초과: 결과 채워짐"
@@ -523,26 +561,27 @@ assert_contains "$BODY" "np-enterprise/engine" "3분 초과: 경로 2단계"
 
 # 3. last_assistant_message 없음 -> last-prompt 로 폴백, "확인 불가" 안 나옴
 run_stop "$((NOW - 720))" ""
-BODY=$(cat "$OUTDIR/curl.args" 2>/dev/null)
+BODY=$(curl_stub_body)
 assert_contains "$BODY" "커밋 푸시 부탁" "결과 없음: last-prompt 폴백"
 case "$BODY" in *"확인 불가"*) assert_eq "없음" "있음" "결과 없음: '확인 불가' 미출력" ;;
                 *) assert_eq "없음" "없음" "결과 없음: '확인 불가' 미출력" ;; esac
 
 # 4. 깨진 줄 포함 트랜스크립트 -> 정상 전송
-rm -f "$OUTDIR/curl.args"
+curl_stub_reset
 printf '%s\n' "$((NOW - 720))" > "$CC_NOTIFY_STATE_DIR/s2.turn"
 jq -nc --arg t "$HERE/fixtures/transcript_broken.jsonl" \
   '{session_id:"s2",cwd:"/tmp/x/y",transcript_path:$t,last_assistant_message:"결과"}' \
   | bash "$HERE/../scripts/notify-stop.sh"
-BODY=$(cat "$OUTDIR/curl.args" 2>/dev/null)
+BODY=$(curl_stub_body)
 assert_contains "$BODY" "마지막 프롬프트" "깨진 줄: 정상 전송"
 
 # 5. .turn 파일 없음 -> 죽지 않고 전송도 안 함
-rm -f "$OUTDIR/curl.args" "$CC_NOTIFY_STATE_DIR/s3.turn"
+curl_stub_reset
+rm -f "$CC_NOTIFY_STATE_DIR/s3.turn"
 jq -nc --arg t "$OK" '{session_id:"s3",cwd:"/tmp",transcript_path:$t,last_assistant_message:"x"}' \
   | bash "$HERE/../scripts/notify-stop.sh" && rc=0 || rc=$?
 assert_eq "0" "$rc" "turn 파일 없음: 정상 종료"
-assert_eq "false" "$([ -f "$OUTDIR/curl.args" ] && echo true || echo false)" "turn 파일 없음: 전송 안 함"
+assert_eq "false" "$(curl_stub_sent)" "turn 파일 없음: 전송 안 함"
 
 finish
 ```
@@ -661,21 +700,12 @@ git commit -m "feat(note): Stop 훅을 '오래 걸린 턴만' 알림으로 교�
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/assert.sh"
 
+. "$HERE/curl_stub.sh"
+
 export CC_NOTIFY_STATE_DIR="$(mktemp -d)"
 OUTDIR="$(mktemp -d)"
 trap 'rm -rf "$CC_NOTIFY_STATE_DIR" "$OUTDIR"' EXIT
-
-mkdir -p "$OUTDIR/bin"
-cat > "$OUTDIR/bin/curl" <<'STUB'
-#!/usr/bin/env bash
-for a in "$@"; do printf '%s\n' "$a"; done > "$OUTDIR_CAPTURE/curl.args"
-exit 0
-STUB
-chmod +x "$OUTDIR/bin/curl"
-export OUTDIR_CAPTURE="$OUTDIR"
-export PATH="$OUTDIR/bin:$PATH"
-echo "fake-webhook-url" > "$OUTDIR/webhook"
-export CC_SLACK_WEBHOOK_FILE="$OUTDIR/webhook"
+install_curl_stub "$OUTDIR"
 
 NOW=$(date +%s)
 
@@ -688,7 +718,7 @@ done
 jq -nc '{type:"ai-title",aiTitle:"긴 세션"}' >> "$NONOTE"
 
 run_end() {  # <transcript> <session_id>
-  rm -f "$OUTDIR/curl.args"
+  curl_stub_reset
   mkdir -p "$CC_NOTIFY_STATE_DIR"
   printf '%s\n' "$((NOW - 2820))" > "$CC_NOTIFY_STATE_DIR/$2.session"
   printf '%s\n' "$NOW" > "$CC_NOTIFY_STATE_DIR/$2.turn"
@@ -701,7 +731,7 @@ echo "test_notify_session"
 
 # 1. note 0건 + 프롬프트 6건 -> 🧠 경고 붙음
 run_end "$NONOTE" "e1"
-BODY=$(cat "$OUTDIR/curl.args" 2>/dev/null)
+BODY=$(curl_stub_body)
 assert_contains "$BODY" "세션 종료" "요약 전송됨"
 assert_contains "$BODY" "47분" "세션 길이"
 assert_contains "$BODY" "6턴" "턴 수"
@@ -710,7 +740,7 @@ assert_contains "$BODY" "note 0건" "note 누락 경고 있음"
 
 # 2. note 1건 있는 트랜스크립트 -> 🧠 경고 없음
 run_end "$HERE/fixtures/transcript_ok.jsonl" "e2"
-BODY=$(cat "$OUTDIR/curl.args" 2>/dev/null)
+BODY=$(curl_stub_body)
 case "$BODY" in *"note 0건"*) assert_eq "없음" "있음" "note 있으면 경고 없음" ;;
                 *) assert_eq "없음" "없음" "note 있으면 경고 없음" ;; esac
 
@@ -719,7 +749,7 @@ SHORT="$OUTDIR/short.jsonl"
 : > "$SHORT"
 for i in 1 2 3; do jq -nc --arg p "p$i" '{type:"last-prompt",lastPrompt:$p}' >> "$SHORT"; done
 run_end "$SHORT" "e3"
-BODY=$(cat "$OUTDIR/curl.args" 2>/dev/null)
+BODY=$(curl_stub_body)
 case "$BODY" in *"note 0건"*) assert_eq "없음" "있음" "짧은 세션: 경고 없음" ;;
                 *) assert_eq "없음" "없음" "짧은 세션: 경고 없음" ;; esac
 
