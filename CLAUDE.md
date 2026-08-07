@@ -13,6 +13,7 @@ ls -la ~/.claude/skills/story-to-spec
 ls -la ~/.claude/skills/add-task
 ls -la ~/.claude/skills/update-ticket
 ls -la ~/.claude/skills/implement
+ls -la ~/.claude/skills/impl-wave
 ls -la ~/.claude/skills/spec-diff
 ls -la ~/.claude/skills/scrum
 ls -la ~/.claude/skills/note
@@ -95,6 +96,20 @@ git config user.email
   ▼
 /review NPP02-YYYY
      코드 리뷰 → 머지 판단
+```
+
+티켓이 여러 개고 선후행이 얽혀 있으면 `/implement` 대신:
+
+```
+/impl-wave NPP02-XXXX [--dry-run] [--from N] [--base <브랜치>]
+   스토리 하위 Task → 의존 그래프 → 차수(병렬 묶음) 확정 → 차수 표 확인 1회
+   차수마다: 병렬 디스패치(/implement 재사용) → CI → 자동 머지(dev)
+             → dev 배포(workflow_dispatch) → E2E 검증 → PR 코멘트
+   검증: Client 포함 차수 = client-verify(np-enterprise 프로젝트 스킬)
+         Backend·Engine만 = 바뀐 엔드포인트만 직접 API 호출
+   ⚠️ dev에 자동 머지한다. 스킬 호출이 곧 승인이다.
+   ⚠️ np-enterprise 워킹 디렉토리에서 실행할 것.
+   ⚠️ 버그는 메인 에이전트가 직접 고친다. revert 하지 않는다.
 ```
 
 파이프라인 밖 (읽기 전용):
