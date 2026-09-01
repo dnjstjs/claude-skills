@@ -37,6 +37,12 @@ gh repo clone dnjstjs/claude-skills ~/claude-skills
 |------|------|--------|
 | `np-eks-debug` | EKS(dev/stg) 인프라·배포 상태 조사 — 토폴로지, 배포버전 확인, curl 직접 호출, 진단 플레이북 | `/np-eks-debug dev` |
 
+글쓰기:
+
+| 스킬 | 설명 | 사용법 |
+|------|------|--------|
+| `dev-tone` | PR/기술문서/Jira/리뷰 코멘트를 AI스러운 문체 대신 담백한 개발자 문체로 다듬기. 명시적으로 호출했을 때만 동작 | `/dev-tone`, `/dev-tone docs/report.md`, `/dev-tone <PR URL>` |
+
 > np-enterprise 구조 지식(패키지 지도·경로 라우팅·`Module:` 허용값)은
 > `story-to-spec/references/np-enterprise-structure.md` **한 곳에만** 있습니다.
 > 구조가 바뀌면 그 파일을 고치세요.
