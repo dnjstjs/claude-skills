@@ -32,6 +32,12 @@ gh repo clone dnjstjs/claude-skills ~/claude-skills
 | `scrum` | 내 티켓 상태 스냅샷 → 데일리 스크럼 공유 문안 4섹션 (슬랙 복붙용) | `/scrum NPP02` |
 | `note` | 세션 간 사라지는 도메인 판정을 근거와 함께 기록. 근거가 바뀌면 ⚠ 표시 | `/note "presigned URL은 백엔드가 발급"` |
 
+인프라 디버깅:
+
+| 스킬 | 설명 | 사용법 |
+|------|------|--------|
+| `np-eks-debug` | EKS(dev/stg) 인프라·배포 상태 조사 — 토폴로지, 배포버전 확인, curl 직접 호출, 진단 플레이북 | `/np-eks-debug dev` |
+
 > np-enterprise 구조 지식(패키지 지도·경로 라우팅·`Module:` 허용값)은
 > `story-to-spec/references/np-enterprise-structure.md` **한 곳에만** 있습니다.
 > 구조가 바뀌면 그 파일을 고치세요.
