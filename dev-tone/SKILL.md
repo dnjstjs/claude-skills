@@ -78,7 +78,7 @@ PR 설명은 해당 코드베이스를 이미 알고 있는 같은 팀 개발자
 |---|---|---|
 | 로컬 파일 경로 | `.md` 등 확장자를 가지거나 `/`, `~`로 시작하는 경로 | Read 도구로 파일 내용을 읽는다 |
 | GitHub PR URL | `github.com/<owner>/<repo>/pull/<N>` 패턴 | `gh pr view <N> --repo <owner>/<repo> --json body --jq .body`로 본문 조회. 특정 코멘트를 다듬으려는 것일 수도 있으므로, URL만 주어지고 대상이 불명확하면 추측하지 말고 "PR 본문을 다듬을까요, 아니면 특정 코멘트인가요?"라고 먼저 확인한다 |
-| Confluence URL | `atlassian.net/wiki/...` 등 Confluence 도메인 패턴 | 기존 연결된 Atlassian MCP 도구(`getConfluencePage` 등)로 페이지 본문 조회 |
+| Confluence URL | `atlassian.net/wiki/...` 등 Confluence 도메인 패턴 | 기존 연결된 Atlassian MCP 도구(`mcp__atlassian__getConfluencePage` 등)로 페이지 본문 조회 |
 | Claude Artifact URL | `claude.ai/...` 형태 | WebFetch로 내용 조회 |
 
 ## 출력 및 반영
@@ -86,13 +86,13 @@ PR 설명은 해당 코드베이스를 이미 알고 있는 같은 팀 개발자
 1. **항상 먼저** 다듬은 결과를 대화창에 diff 형태(원문 vs 다듬은 버전)로 보여준다.
    이 단계는 소스 종류와 무관하게 공통이다 — 파일이든 PR이든 반영 전에 반드시 미리보기부터.
 2. 사용자가 반영을 원하면 원본 종류에 따라 처리한다:
-   - **로컬 파일**: git으로 되돌릴 수 있으므로 별도 확인 없이 바로 Edit 도구로 반영한다.
+   - **로컬 파일**: 사용자가 반영을 요청하면 git으로 되돌릴 수 있으므로 추가 확인 없이 바로 Edit 도구로 반영한다.
    - **PR 본문**: 반영 직전 "PR #<N> 본문을 이 내용으로 덮어써도 될까요?"처럼 한 번 더
      명시적으로 확인한 뒤 `gh pr edit <N> --body "<다듬은 내용>"`으로 반영한다.
    - **PR 코멘트**: 반영 직전 한 번 더 확인한 뒤 `gh pr comment <N> --body "<다듬은 내용>"`
      (신규 코멘트) 또는 `gh api`로 기존 코멘트 수정.
    - **Confluence 페이지**: 반영 직전 한 번 더 확인한 뒤 해당 Atlassian MCP 도구
-     (`updateConfluencePage` 등)로 반영한다.
+     (`mcp__atlassian__updateConfluencePage` 등)로 반영한다.
    - **Claude Artifact**: 이 스킬은 재배포하지 않는다. 다듬은 텍스트만 제공하고,
      Artifact 갱신 자체는 사용자가 별도로 요청하면 그때 Artifact 도구로 처리한다.
 3. 사용자가 "텍스트만 달라"고 하면 1번 단계 이후 반영 없이 종료한다.
